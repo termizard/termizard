@@ -13,14 +13,19 @@ import (
 	"github.com/creack/pty"
 )
 
+// UnixPTY implements the PTY interface for Unix systems (Linux/macOS).
 type UnixPTY struct {
 	f   *os.File
 	cmd *exec.Cmd
 }
 
-// StartPTY запускает команду в PTY. Дополнительные аргументы можно передавать.
-func StartPTY(command string, args ...string) (*UnixPTY, error) {
+// StartPTY starts the specified command in a new PTY session.
+func StartPTY(command string, args ...string) (PTY, error) {
 	c := exec.Command(command, args...)
+	// Set the UTF-8 environment so that the shell correctly outputs Emoji
+	c.Env = os.Environ()
+	c.Env = append(c.Env, "LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8", "TERM=xterm-256color")
+
 	f, err := pty.Start(c)
 	if err != nil {
 		return nil, err
@@ -35,10 +40,10 @@ func (p *UnixPTY) Resize(cols, rows int) error {
 	return pty.Setsize(p.f, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 }
 func (p *UnixPTY) Pid() int {
-	if p == nil {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return 0
 	}
-	return p.Pid()
+	return p.cmd.Process.Pid
 }
 
 // WaitContext waits for the child process to terminate or the context to be canceled.

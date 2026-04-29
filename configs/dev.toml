@@ -1,0 +1,5 @@
+env = ""
+
+[terminal]
+rows = 24
+cols = 80

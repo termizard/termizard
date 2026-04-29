@@ -10,14 +10,18 @@ import (
 	"github.com/admpub/conpty"
 )
 
-// WinPTY implements a PTY interface on top of ConPTY.
+// WinPTY implements the PTY interface for Windows using ConPTY.
 type WinPTY struct {
 	c *conpty.ConPty
 }
 
-// StartPTY starts a command in ConPTY and returns a wrapper.
-func StartPTY(command string, args ...string) (*WinPTY, error) {
+// StartPTY starts a command in a new ConPTY session.
+func StartPTY(command string, args ...string) (PTY, error) {
 	cmdWithArgs := append([]string{command}, args...)
+	// For Windows, ConPTY usually handles UTF-8 well on its own,
+	// but environment variables can be explicitly set if the library supports it.
+	// conpty.Start does not take Env directly in the current implementation (based on typical API),
+	// so we rely on system settings or a wrapper.
 	c, err := conpty.Start(cmdWithArgs)
 	if err != nil {
 		return nil, err
