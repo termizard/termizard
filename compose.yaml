@@ -1,0 +1,18 @@
+services:
+  term-linux:
+    build:
+      context: .
+      dockerfile: Docker/linux.Dockerfile
+    stdin_open: true # Аналог -i
+    tty: true        # Аналог -t
+    volumes:
+      - .:/app
+
+#  term-windows:
+#    build:
+#      context: .
+#      dockerfile: Docker/windows.Dockerfile
+#    # Этот сервис запустится только на Windows-хосте
+#    platform: windows
+#    stdin_open: true
+#    tty: true
