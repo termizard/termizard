@@ -1,0 +1,27 @@
+# Codecov configuration
+# https://docs.codecov.com/docs/codecovyml-reference
+
+coverage:
+  precision: 2
+  round: down
+  range: "50...100"
+  status:
+    project:
+      default:
+        target: auto  # track improvement, no hard fail while project is young
+        threshold: 5%
+
+# Paths excluded from coverage (entry points and generated code)
+ignore:
+  - "cmd/"
+  - "tmp/"
+  - "examples/"
+
+parsers:
+  go:
+    partials_as_hits: false
+
+comment:
+  layout: "header, diff, flags, components"
+  behavior: default
+  require_changes: false
