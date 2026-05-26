@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="assets/logo.png" alt="TERMizard Logo" width="180" />
+</p>
+
+<h1 align="center">TERMizard</h1>
+
 # TERMizard
 
 A terminal emulator and TUI framework written in Go.
