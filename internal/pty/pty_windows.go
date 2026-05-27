@@ -43,7 +43,7 @@ type windowsPTY struct {
 	proc     windows.Handle // child process handle
 	thread   windows.Handle // child thread handle (closed after Start)
 	pid      uint32
-	attrList *windows.ProcThreadAttributeList
+	attrList *windows.ProcThreadAttributeListContainer
 	once     sync.Once // guards Close
 }
 
@@ -111,7 +111,7 @@ func Open(cfg Config) (PTY, error) {
 	// reads the attribute list pointer that follows the base STARTUPINFOW.
 	var siex startupInfoEx
 	siex.Cb = uint32(unsafe.Sizeof(siex))
-	siex.lpAttributeList = attrList.List()
+	siex.lpAttributeList = unsafe.Pointer(attrList.List())
 
 	cmdLine, err := windows.UTF16PtrFromString(makeCmdLine(command))
 	if err != nil {

@@ -75,7 +75,7 @@ func (p *unixPTY) Write(buf []byte) (int, error) {
 // Resize informs the kernel of new terminal dimensions.
 // TIOCSWINSZ delivers SIGWINCH to the child's process group automatically.
 func (p *unixPTY) Resize(cols, rows uint16) error {
-	err := unix.IoctlSetWinsize(int(p.master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{ //nolint:gosec // Fd() fits int on all supported platforms
+	err := unix.IoctlSetWinsize(int(p.master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{ //nolint:gosec // G115: os.File.Fd() always returns a valid non-negative fd that fits in int
 		Col: cols,
 		Row: rows,
 	})
