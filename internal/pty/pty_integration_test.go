@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/termizard/termizard/docs/ADR/internal/pty"
+	"github.com/termizard/termizard/internal/pty"
 )
 
 const (
@@ -56,9 +56,11 @@ func drainPTY(p pty.PTY, timeout time.Duration) (string, bool) {
 
 // TestOpenPidFd verifies that Open succeeds and returns a positive PID and Fd.
 func TestOpenPidFd(t *testing.T) {
-	p := openTestPTY(t, pty.Config{
-		Command: []string{"/bin/sh"},
-	})
+	p := openTestPTY(
+		t, pty.Config{
+			Command: []string{"/bin/sh"},
+		},
+	)
 	if p.Pid() <= 0 {
 		t.Errorf("expected positive PID, got %d", p.Pid())
 	}
@@ -69,9 +71,11 @@ func TestOpenPidFd(t *testing.T) {
 
 // TestClose verifies that Close returns no error.
 func TestClose(t *testing.T) {
-	p := openTestPTY(t, pty.Config{
-		Command: []string{"/bin/sh"},
-	})
+	p := openTestPTY(
+		t, pty.Config{
+			Command: []string{"/bin/sh"},
+		},
+	)
 	if err := p.Close(); err != nil {
 		t.Errorf("Close: %v", err)
 	}
@@ -80,9 +84,11 @@ func TestClose(t *testing.T) {
 
 // TestResize verifies that Resize does not return an error for reasonable dimensions.
 func TestResize(t *testing.T) {
-	p := openTestPTY(t, pty.Config{
-		Command: []string{"/bin/sh"},
-	})
+	p := openTestPTY(
+		t, pty.Config{
+			Command: []string{"/bin/sh"},
+		},
+	)
 	for _, tc := range []struct{ cols, rows uint16 }{{120, 40}, {200, 50}, {80, 24}} {
 		if err := p.Resize(tc.cols, tc.rows); err != nil {
 			t.Errorf("Resize(%d,%d): %v", tc.cols, tc.rows, err)
@@ -94,9 +100,11 @@ func TestResize(t *testing.T) {
 // On macOS, cmd.Wait() blocks until the PTY is fully drained, so we drain
 // first. The drain goroutine returns EIO/EOF when the child exits.
 func TestReadOutput(t *testing.T) {
-	p := openTestPTY(t, pty.Config{
-		Command: []string{"/bin/sh", "-c", "echo hello-pty-test"},
-	})
+	p := openTestPTY(
+		t, pty.Config{
+			Command: []string{"/bin/sh", "-c", "echo hello-pty-test"},
+		},
+	)
 
 	out, ok := drainPTY(p, ptyTimeout)
 	if !ok {
@@ -109,9 +117,11 @@ func TestReadOutput(t *testing.T) {
 
 // TestWrite sends a command to the shell via Write and reads the echoed output.
 func TestWrite(t *testing.T) {
-	p := openTestPTY(t, pty.Config{
-		Command: []string{"/bin/sh"},
-	})
+	p := openTestPTY(
+		t, pty.Config{
+			Command: []string{"/bin/sh"},
+		},
+	)
 
 	// drainPTY in the background — it unblocks when the shell exits.
 	outCh := make(chan string, 1)
@@ -142,9 +152,11 @@ func TestWrite(t *testing.T) {
 // TestWait verifies that Wait returns when the child exits cleanly.
 // Using a shell built-in (exit) avoids the macOS PTY drain-first requirement.
 func TestWait(t *testing.T) {
-	p := openTestPTY(t, pty.Config{
-		Command: []string{"/bin/sh", "-c", "exit 0"},
-	})
+	p := openTestPTY(
+		t, pty.Config{
+			Command: []string{"/bin/sh", "-c", "exit 0"},
+		},
+	)
 
 	done := make(chan error, 1)
 	go func() { done <- p.Wait() }()
