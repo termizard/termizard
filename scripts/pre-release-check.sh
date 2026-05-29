@@ -196,7 +196,7 @@ echo ""
 
 # 8. Test coverage check
 log_info "Checking test coverage..."
-COVERAGE=$(go test -cover ./... 2>&1 | grep "coverage:" | tail -1 | awk '{print $3}' | sed 's/%//')
+COVERAGE=$(go test -count=1 -cover ./... 2>&1 | grep "coverage:" | tail -1 | awk -F'coverage: ' '{print $2}' | awk '{print $1}' | sed 's/%//')
 if [ -n "$COVERAGE" ]; then
     echo "  overall coverage: ${COVERAGE}%"
     if awk -v cov="$COVERAGE" 'BEGIN {exit !(cov >= 70.0)}'; then

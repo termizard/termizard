@@ -60,15 +60,15 @@ crate into a Go package:
 ```
 Rio crate             │ Role                              │ Go package
 ──────────────────────┼───────────────────────────────────┼──────────────────────
-teletypewriter        │ PTY creation, fork/exec, resize   │ pkg/pty
-copa                  │ VTE ANSI parser (fork of vte)     │ pkg/vte
-corcovado             │ I/O event loop (fork of mio)      │ pkg/eventloop  (goroutines)
-rio-backend           │ terminal model, grid, selection   │ pkg/terminal
-rio-grapheme-width    │ Unicode grapheme cluster width    │ pkg/grapheme
-rio-notifier          │ file/config change notifications  │ pkg/watcher
-sugarloaf             │ GPU renderer (wgpu + fonts)       │ pkg/renderer
-rio-window            │ windowing (fork of winit)         │ pkg/window     (gogpu)
-frontends/rioterm     │ app binary, tabs, splits, config  │ cmd/goterm + pkg/app
+teletypewriter        │ PTY creation, fork/exec, resize   │ internal/pty
+copa                  │ VTE ANSI parser (fork of vte)     │ go-vte library + internal/vte
+corcovado             │ I/O event loop (fork of mio)      │ internal/eventloop  (goroutines)
+rio-backend           │ terminal model, grid, selection   │ internal/terminal
+rio-grapheme-width    │ Unicode grapheme cluster width    │ internal/grapheme
+rio-notifier          │ file/config change notifications  │ internal/watcher
+sugarloaf             │ GPU renderer (wgpu + fonts)       │ internal/renderer
+rio-window            │ windowing (fork of winit)         │ internal/window     (gogpu)
+frontends/rioterm     │ app binary, tabs, splits, config  │ cmd/goterm + internal/app
 ```
 
 ### Rio's Key Architectural Decisions We Adopt
@@ -268,7 +268,7 @@ goterm/
 │   └── goterm/
 │       └── main.go                 # entry point — wires everything together
 │
-├── pkg/
+├── internal/
 │   │
 │   ├── pty/                        # ← teletypewriter (Rio)
 │   │   ├── pty.go                  #   PTY interface
@@ -276,11 +276,9 @@ goterm/
 │   │   ├── pty_windows.go          #   ConPTY (Windows Pseudo Console API)
 │   │   └── process.go              #   spawn shell, waitpid, SIGCHLD
 │   │
-│   ├── vte/                        # ← copa (Rio) — VTE state machine
-│   │   ├── parser.go               #   Paul Williams VT500 automaton
-│   │   ├── sequences.go            #   CSI / OSC / DCS / APC dispatch tables
-│   │   ├── handler.go              #   Handler interface (Print, Execute, CSI, OSC…)
-│   │   └── params.go               #   parameter parsing (;: separated ints)
+│   ├── vte/                        # ← copa (Rio) — thin adapter over go-vte library
+│   │   ├── performer.go            #   implements vte.Performer (library interface)
+│   │   └── sequences.go            #   OSC / DCS dispatch helpers
 │   │
 │   ├── grapheme/                   # ← rio-grapheme-width (Rio v0.4)
 │   │   └── width.go                #   Unicode grapheme cluster width (EAW, ZWJ)
@@ -330,10 +328,10 @@ goterm/
 ```
 
 **Invariants mirrored from Rio:**
-- `pkg/vte` has zero knowledge of `pkg/renderer`. It only calls `Handler` methods.
-- `pkg/terminal` has zero knowledge of `pkg/renderer`. It exposes `Grid()`.
-- `pkg/renderer` consumes `[][]Cell` — no PTY, no VTE state.
-- `pkg/app` is the only package that wires all layers together.
+- `internal/vte` has zero knowledge of `internal/renderer`. It only calls `Performer` methods.
+- `internal/terminal` has zero knowledge of `internal/renderer`. It exposes `Grid()`.
+- `internal/renderer` consumes `[][]Cell` — no PTY, no VTE state.
+- `internal/app` is the only package that wires all layers together.
 
 ---
 
@@ -487,7 +485,7 @@ This matches sugarloaf's approach of gracefully expanding before evicting.
 ### PTY Layer
 
 ```go
-// pkg/pty/pty.go
+// internal/pty/pty.go
 type PTY interface {
     Read(p []byte) (int, error)
     Write(p []byte) (int, error)
@@ -511,7 +509,7 @@ Rio uses `corcovado` (a fork of mio) for async I/O. In Go, goroutines and channe
 are the natural equivalent:
 
 ```go
-// pkg/app/app.go
+// internal/app/app.go
 
 func (a *App) Run() error {
     ptyCh    := make(chan []byte, 256)   // raw bytes from PTY
@@ -566,36 +564,90 @@ Lock contention is minimal because `Parse` batches updates and `Frame` is called
 
 ## 8. Decision 5 — VTE Parser
 
-We implement the [Paul Williams VT500 state machine](https://vt100.net/emu/dec_ansi_parser).
-Rio uses `copa` (its fork of `alacritty/vte`). Our Go implementation follows the same
-automaton but expressed as a tight switch statement (no heap allocations in the hot path).
+### Approach — own parser modelled on go-vte  ✅  (mirrors Rio's copa strategy)
 
-### Handler Interface
+Rio does not use `alacritty/vte` as-is — it forks it into `copa` and extends it.
+We follow the same pattern: **`internal/vte` is our own Go parser**, built by porting
+`go-vte` (a Go translation of `alacritty/vte`).
+
+This gives us:
+- A complete, fuzz-tested [Paul Williams VT500 state machine](https://vt100.net/emu/dec_ansi_parser) as the starting point.
+- Full control to extend the automaton (e.g. Kitty keyboard protocol, Sixel) without
+  waiting on upstream.
+- No runtime library dependency — the parser is part of the module.
+
+### Package layout
+
+```
+internal/vte/
+  parser.go       — Paul Williams automaton (ported from go-vte / alacritty/vte)
+  performer.go    — Performer interface + terminal adapter
+  sequences.go    — OSC / DCS dispatch helpers
+  params.go       — parameter parsing (;: separated uint16 sub-params)
+```
+
+### Performer Interface
 
 ```go
-// pkg/vte/handler.go
-type Handler interface {
-    // C0/C1 control characters (BS, CR, LF, BEL, HT…)
-    Execute(b byte)
+// internal/vte/performer.go
 
-    // Printable character — the most frequent call
+// Performer receives callbacks from the parser — identical contract to go-vte.
+type Performer interface {
     Print(r rune)
-
-    // CSI sequences: ESC [ params... intermediate... final
-    // e.g. SGR: CSI 1;31 m  → params=[1,31] final='m'
-    CSI(params []int, intermediates []byte, final byte)
-
-    // OSC sequences: ESC ] n ; data ST
-    OSC(params [][]byte)
-
-    // DCS sequences (Sixel etc.)
-    DCS(params []int, intermediates []byte, final byte)
+    Execute(b byte)
+    CSI(params [][]uint16, intermediates []byte, ignore bool, final rune)
+    OSC(params [][]byte, bellTerminated bool)
+    DCS(params [][]uint16, intermediates []byte, ignore bool, final rune)
     DCSPut(b byte)
     DCSUnhook()
 }
+
+// TermPerformer bridges parser callbacks into internal/terminal state updates.
+type TermPerformer struct {
+    term *terminal.Terminal
+}
+
+var _ Performer = (*TermPerformer)(nil)
+
+func (p *TermPerformer) Print(r rune)    { p.term.Print(r) }
+func (p *TermPerformer) Execute(b byte)  { p.term.Execute(b) }
+
+func (p *TermPerformer) CSI(params [][]uint16, intermediates []byte, ignore bool, final rune) {
+    p.term.CSI(params, intermediates, ignore, final)
+}
+
+func (p *TermPerformer) OSC(params [][]byte, bellTerminated bool) {
+    p.term.OSC(params, bellTerminated)
+}
+
+func (p *TermPerformer) DCS(params [][]uint16, intermediates []byte, ignore bool, final rune) {}
+func (p *TermPerformer) DCSPut(b byte) {}
+func (p *TermPerformer) DCSUnhook()    {}
 ```
 
-### Sequence Priority
+Usage in the PTY read goroutine:
+
+```go
+parser    := vte.New()
+performer := &vte.TermPerformer{Term: terminal}
+
+for data := range ptyCh {
+    parser.Advance(performer, data)   // zero-alloc hot path
+    app.RequestRedraw()
+}
+```
+
+### Strategy comparison
+
+| Criterion         | Pure hand-roll            | go-vte library only     | **Own parser (Rio strategy)** |
+|-------------------|---------------------------|-------------------------|-------------------------------|
+| Correctness base  | Error-prone from zero     | Fuzz-tested upstream    | ✅ Fuzz-tested starting point  |
+| Flexibility       | Full                      | Limited to library API  | ✅ Full — we own the code      |
+| Extensions        | Easy                      | Fork or patch upstream  | ✅ Easy — extend in-tree       |
+| Maintenance       | We own all edge cases     | Upstream does it        | Shared: port fixes as needed  |
+| **Verdict**       | Too risky                 | Loses flexibility       | ✅ Chosen                      |
+
+### Sequence Priority (implemented in `internal/terminal`, not the parser)
 
 ```
 PHASE 1 — MVP (terminal is usable):
@@ -698,42 +750,42 @@ GOGPU_GRAPHICS_API=software go test ./...
 ## 11. Implementation Phases
 
 ```
-Phase 1  Weeks 1–3    PTY + VTE parser
+Phase 1  Weeks 1–3    PTY + VTE adapter
          ─────────────────────────────────────────────────────────
-         Deliverables: pkg/pty, pkg/vte, pkg/grapheme
+         Deliverables: internal/pty, internal/vte (Performer), internal/grapheme
          Test gate:    echo / ls --color / htop render correct ANSI
                        vttest Phase 1 (cursor movement) passes
                        ConPTY smoke test on Windows
 
 Phase 2  Weeks 4–6    Terminal Model
          ─────────────────────────────────────────────────────────
-         Deliverables: pkg/terminal (grid, screen, scrollback, selection)
+         Deliverables: internal/terminal (grid, screen, scrollback, selection)
          Test gate:    vim opens and edits a file (no renderer yet)
                        alternate screen switch works (vim ↔ shell)
                        resize does not corrupt grid content
 
 Phase 3  Weeks 7–9    Software Renderer (CPU, debug only)
          ─────────────────────────────────────────────────────────
-         Deliverables: pkg/renderer (software path: writes PPM/PNG per frame)
+         Deliverables: internal/renderer (software path: writes PPM/PNG per frame)
          Test gate:    screenshot of rendered 80×24 grid matches expected PNG
 
 Phase 4  Weeks 10–15  GPU Renderer
          ─────────────────────────────────────────────────────────
-         Deliverables: pkg/renderer full (atlas, two-pass pipeline, WGSL shaders)
+         Deliverables: internal/renderer full (atlas, two-pass pipeline, WGSL shaders)
          Test gate:    triangle on screen → one glyph → full text grid
                        line hash dedup: frametime drops ≥ 50% on idle screen
                        glyph atlas: no visible corruption at HiDPI (2×)
 
 Phase 5  Weeks 16–18  Window + Interactive Loop
          ─────────────────────────────────────────────────────────
-         Deliverables: pkg/app, gogpu event wiring, keybindings
+         Deliverables: internal/app, gogpu event wiring, keybindings
          Test gate:    type in shell → output appears on screen
                        resize window → terminal reflowed correctly
                        CPU usage < 1% when idle
 
 Phase 6  Weeks 19–21  Config, Tabs, Splits
          ─────────────────────────────────────────────────────────
-         Deliverables: pkg/config, pkg/watcher, tabs, splits in pkg/app
+         Deliverables: internal/config, internal/watcher, tabs, splits in internal/app
          Test gate:    TOML config reloads without restart
                        multiple tabs with independent PTYs
 
@@ -782,7 +834,7 @@ Wayland windowing ourselves. This is 3–6 months of work already done in `gogpu
 |-----------------------------------------------|------------|---------------------------------------------------------|
 | `gogpu` bug on Apple Silicon Metal path       | Medium     | `-tags rust` → wgpu-native fallback; test on M-series in CI |
 | Go GC pause causes frame stutter              | Medium     | `runtime.LockOSThread()` on render goroutine; `sync.Pool` for vertex slices; tune `GOGC` |
-| VTE parser incomplete for edge cases          | High       | vttest suite in CI from Phase 1; fuzz with real programs |
+| go-vte library missing edge cases / unmaintained | Low–Med  | vttest suite in CI from Phase 1; Performer adapter isolates parser — swappable |
 | Pure Go wgpu throughput insufficient          | High       | Accepted trade-off: dev = Pure Go, release = `-tags rust` |
 | Font rasterisation quality (sfnt vs freetype) | Medium     | A/B test both; sfnt for zero-CGO default, freetype opt-in |
 | ConPTY (Windows) edge cases                   | Medium     | Windows CI runner; mirror Rio's teletypewriter Windows code |
@@ -802,6 +854,8 @@ Wayland windowing ourselves. This is 3–6 months of work already done in `gogpu
 | gogpu/gogpu                      | https://github.com/gogpu/gogpu                                  |
 | gogpu/wgpu                       | https://github.com/gogpu/wgpu                                   |
 | Paul Williams VT500 state machine| https://vt100.net/emu/dec_ansi_parser                           |
+| go-vte (porting reference)       | https://github.com/nicowillis/go-vte                            |
+| alacritty/vte (original Rust)    | https://github.com/alacritty/vte                                |
 | vtebench (Alacritty's tool)      | https://github.com/alacritty/vtebench                           |
 | Input latency measurements       | https://dev.to/lkhrs/measuring-terminal-latency-26m7            |
 | Ghostty performance discussion   | https://github.com/ghostty-org/ghostty/discussions/4837         |
