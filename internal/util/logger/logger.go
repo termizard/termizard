@@ -34,16 +34,6 @@ func Get() *slog.Logger { return ptr.Load() }
 //   - [slog.LevelDebug]: internal diagnostics (resize events, fd registration)
 //   - [slog.LevelInfo]: important lifecycle events (pty opened/closed)
 //   - [slog.LevelWarn]: non-fatal issues (process already exited, resize failures)
-//
-// Example:
-//
-//	// Enable info-level logging to stderr:
-//	logger.Set(slog.Default())
-//
-//	// Enable debug-level logging for full diagnostics:
-//	logger.Set(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-//	    Level: slog.LevelDebug,
-//	})))
 func Set(l *slog.Logger) {
 	if l == nil {
 		l = slog.New(nopHandler{})
@@ -52,8 +42,6 @@ func Set(l *slog.Logger) {
 }
 
 // With returns a derived logger with the given attributes pre-applied.
-// Equivalent to Get().With(args...) — useful for sub-package loggers
-// that always attach a "component" or "pid" field.
 func With(args ...any) *slog.Logger {
 	return ptr.Load().With(args...)
 }

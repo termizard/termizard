@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/termizard/termizard/internal/logger"
+	"github.com/termizard/termizard/internal/util/logger"
 )
 
 func TestDefaultIsSilent(t *testing.T) {
@@ -15,8 +15,6 @@ func TestDefaultIsSilent(t *testing.T) {
 	if l == nil {
 		t.Fatal("Get returned nil")
 	}
-	// default handler must report Enabled=false for every level so callers
-	// skip message formatting entirely (zero-cost disabled logging).
 	for _, lvl := range []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError} {
 		if l.Enabled(context.Background(), lvl) {
 			t.Errorf("default logger must be silent, but Enabled=true for %s", lvl)
@@ -30,7 +28,7 @@ func TestSetNilRestoresSilence(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger.Set(slog.New(slog.NewTextHandler(&buf, nil)))
-	logger.Set(nil) // should restore no-op
+	logger.Set(nil)
 
 	if logger.Get() == nil {
 		t.Fatal("Get returned nil after Set(nil)")
@@ -103,7 +101,6 @@ func TestWithDoesNotMutateGlobal(t *testing.T) {
 
 	_ = logger.With("component", "pty")
 
-	// writing via Get() directly should NOT include the "component" attr
 	buf.Reset()
 	logger.Get().Info("no component here")
 	if strings.Contains(buf.String(), "component=pty") {

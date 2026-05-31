@@ -1,5 +1,3 @@
-// White-box tests for nopHandler. Must use package logger (not logger_test)
-// because nopHandler is unexported.
 package logger
 
 import (
