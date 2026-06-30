@@ -5,8 +5,8 @@ go 1.26.1
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/creack/pty v1.1.24
-	github.com/gogpu/gg v0.49.2
-	github.com/gogpu/gogpu v0.42.11
+	github.com/gogpu/gg v0.49.6
+	github.com/gogpu/gogpu v0.43.1-0.20260630092527-3716005762d3
 	github.com/gogpu/gpucontext v0.21.0
 	golang.org/x/sys v0.46.0
 )
@@ -18,6 +18,6 @@ require (
 	github.com/gogpu/gputypes v0.5.1 // indirect
 	github.com/gogpu/naga v0.17.15 // indirect
 	github.com/gogpu/wgpu v0.30.7 // indirect
-	golang.org/x/image v0.41.0 // indirect
+	golang.org/x/image v0.40.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )
