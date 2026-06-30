@@ -105,14 +105,6 @@ func (f *Gogpu) Run() error {
 		if p := f.pendingTitle.Swap(nil); p != nil {
 			f.app.SetTitle(*p)
 		}
-		f.mu.Lock()
-		wins := f.windows
-		f.mu.Unlock()
-		for _, tw := range wins {
-			if p := tw.pendingTitle.Swap(nil); p != nil {
-				tw.win.SetTitle(*p)
-			}
-		}
 	})
 	f.app.OnDraw(f.onDraw)
 	f.app.OnResize(f.onWindowResize)
@@ -134,7 +126,6 @@ func (f *Gogpu) Run() error {
 	})
 
 	return f.app.Run()
-
 }
 
 // Close requests the window to quit and unblocks Run.

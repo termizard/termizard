@@ -2,10 +2,6 @@ module github.com/termizard/termizard
 
 go 1.26.1
 
-replace github.com/gogpu/gogpu => /Users/vladimirzikman/Workspace/opensource/gogpu-projects/gogpu-local
-
-replace github.com/gogpu/gg => /Users/vladimirzikman/Workspace/opensource/gogpu-projects/gg-local
-
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/creack/pty v1.1.24
