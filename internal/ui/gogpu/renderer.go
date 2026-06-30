@@ -22,11 +22,11 @@ func (f *Gogpu) renderTerminal(cc *gg.Context, w, h int, term *terminal.Terminal
 	cw, ch := f.cellW, f.cellH
 	padX, padY := f.padX, f.padY
 
-	// Fill the full window with the default background colour first.
+	// Fill the full window with the default background color first.
 	defBG := parseHexColor(f.cfg.Colors.Background)
 	cc.SetRGBA(defBG.R, defBG.G, defBG.B, 1)
 	cc.DrawRectangle(0, 0, float64(w), float64(h))
-	cc.Fill()
+	_ = cc.Fill()
 
 	curCol, curRow := term.CursorPos()
 	selBG := parseHexColor(f.cfg.Colors.Selection)
@@ -56,7 +56,7 @@ func (f *Gogpu) renderTerminal(cc *gg.Context, w, h int, term *terminal.Terminal
 			// outside the nominal cell rect).
 			cc.SetRGBA(bg.R, bg.G, bg.B, 1)
 			cc.DrawRectangle(x, y, cellW, ch)
-			cc.Fill()
+			_ = cc.Fill()
 
 			// Glyph.
 			if cell.Char != 0 && cell.Char != ' ' && cell.Attrs&terminal.AttrInvisible == 0 {
@@ -92,11 +92,11 @@ func (f *Gogpu) renderTerminal(cc *gg.Context, w, h int, term *terminal.Terminal
 			cc.SetRGBA(cur.R, cur.G, cur.B, 0.4)
 			cc.DrawRectangle(cx, cy, cw, glyphH)
 		}
-		cc.Fill()
+		_ = cc.Fill()
 	}
 }
 
-// ── Colour resolution ─────────────────────────────────────────────────────────
+// ── Color resolution ──────────────────────────────────────────────────────────
 
 type rgba struct{ R, G, B, A float64 }
 
@@ -154,7 +154,7 @@ func (f *Gogpu) indexed256(n int) rgba {
 		v := float64(8+10*(n-232)) / 255
 		return rgba{v, v, v, 1}
 	}
-	// 6×6×6 colour cube: index = 16 + 36r + 6g + b
+	// 6×6×6 color cube: index = 16 + 36r + 6g + b
 	idx := n - 16
 	levels := [6]float64{0, 95.0 / 255, 135.0 / 255, 175.0 / 255, 215.0 / 255, 1}
 	ri := idx / 36
@@ -174,7 +174,7 @@ func parseHexColor(s string) rgba {
 	return rgba{A: 1}
 }
 
-// defaultANSI16 is the xterm 16-colour fallback palette.
+// defaultANSI16 is the xterm 16-color fallback palette.
 var defaultANSI16 = [16]rgba{
 	{0, 0, 0, 1},             // 0  black
 	{0.804, 0, 0, 1},         // 1  red

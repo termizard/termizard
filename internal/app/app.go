@@ -59,10 +59,10 @@ func (a *App) Run() error {
 // Returns nil on error (logged internally).
 func (a *App) newSession(cols, rows uint16) (*terminal.Terminal, func([]byte), func(uint16, uint16), func()) {
 	if cols < 1 {
-		cols = uint16(a.cfg.Terminal.InitialCols)
+		cols = clampUint16(a.cfg.Terminal.InitialCols)
 	}
 	if rows < 1 {
-		rows = uint16(a.cfg.Terminal.InitialRows)
+		rows = clampUint16(a.cfg.Terminal.InitialRows)
 	}
 	if cols < 1 {
 		cols = 80
@@ -141,4 +141,14 @@ func resolveShell(cfg *config.Config) []string {
 		return []string{sh}
 	}
 	return []string{"/bin/sh"}
+}
+
+func clampUint16(v int) uint16 {
+	if v < 0 {
+		return 0
+	}
+	if v > 65535 {
+		return 65535
+	}
+	return uint16(v)
 }

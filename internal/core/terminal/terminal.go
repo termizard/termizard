@@ -152,7 +152,7 @@ func (t *Terminal) Resize(cols, rows int) {
 	}
 	t.primary = primary
 
-	t.alt, _, _, _ = t.alt.resize(cols, rows, nil, false)
+	t.alt, _, _, _ = t.alt.resize(cols, rows, nil, false) //nolint:dogsled // alternate screen has no reflow state
 
 	if onAlt {
 		t.active = t.alt
@@ -305,7 +305,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		s.pendingWrap = false
 
 	case 'A': // CUU — cursor up
-		n := max1(params, 0)
+		n := max1(params)
 		s.cursor.row -= n
 		if s.cursor.row < 0 {
 			s.cursor.row = 0
@@ -313,7 +313,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		s.pendingWrap = false
 
 	case 'B': // CUD — cursor down
-		n := max1(params, 0)
+		n := max1(params)
 		s.cursor.row += n
 		if s.cursor.row >= s.rows() {
 			s.cursor.row = s.rows() - 1
@@ -321,7 +321,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		s.pendingWrap = false
 
 	case 'C': // CUF — cursor forward (right)
-		n := max1(params, 0)
+		n := max1(params)
 		s.cursor.col += n
 		if s.cursor.col >= s.cols() {
 			s.cursor.col = s.cols() - 1
@@ -329,7 +329,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		s.pendingWrap = false
 
 	case 'D': // CUB — cursor back (left)
-		n := max1(params, 0)
+		n := max1(params)
 		s.cursor.col -= n
 		if s.cursor.col < 0 {
 			s.cursor.col = 0
@@ -337,7 +337,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		s.pendingWrap = false
 
 	case 'E': // CNL — cursor next line
-		n := max1(params, 0)
+		n := max1(params)
 		s.cursor.row += n
 		if s.cursor.row >= s.rows() {
 			s.cursor.row = s.rows() - 1
@@ -346,7 +346,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		s.pendingWrap = false
 
 	case 'F': // CPL — cursor previous line
-		n := max1(params, 0)
+		n := max1(params)
 		s.cursor.row -= n
 		if s.cursor.row < 0 {
 			s.cursor.row = 0
@@ -385,7 +385,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		t.eraseLine(s, n)
 
 	case 'X': // ECH — erase characters (no cursor movement)
-		n := max1(params, 0)
+		n := max1(params)
 		end := s.cursor.col + n - 1
 		if end >= s.cols() {
 			end = s.cols() - 1
@@ -393,15 +393,15 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		s.grid.clearLine(s.cursor.row, s.cursor.col, end)
 
 	case 'L': // IL — insert lines
-		n := max1(params, 0)
+		n := max1(params)
 		s.grid.scrollDown(s.cursor.row, s.scrollBot, n)
 
 	case 'M': // DL — delete lines
-		n := max1(params, 0)
+		n := max1(params)
 		s.grid.scrollUp(s.cursor.row, s.scrollBot, n)
 
 	case 'P': // DCH — delete characters
-		n := max1(params, 0)
+		n := max1(params)
 		row := s.cursor.row
 		col := s.cursor.col
 		end := s.cols()
@@ -414,7 +414,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		}
 
 	case '@': // ICH — insert blank characters
-		n := max1(params, 0)
+		n := max1(params)
 		row := s.cursor.row
 		col := s.cursor.col
 		end := s.cols()
@@ -427,13 +427,13 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 		}
 
 	case 'S': // SU — scroll up
-		n := max1(params, 0)
+		n := max1(params)
 		for i := 0; i < n; i++ {
 			t.scrollUpOne(s)
 		}
 
 	case 'T': // SD — scroll down
-		n := max1(params, 0)
+		n := max1(params)
 		s.grid.scrollDown(s.scrollTop, s.scrollBot, n)
 
 	case 'r': // DECSTBM — set scrolling region
@@ -571,7 +571,7 @@ func (t *Terminal) eraseLine(s *screen, mode int) {
 // setMode handles CSI h/l (SM/RM) for private (?) and standard modes.
 func (t *Terminal) setMode(s *screen, params [][]uint16, private, on bool) {
 	for _, p := range params {
-		v := paramVal(p, 0)
+		v := paramVal(p)
 		if private {
 			switch v {
 			case 1: // DECCKM — application cursor keys
@@ -626,16 +626,16 @@ func p1(params [][]uint16, idx int, def uint16) uint16 {
 	if idx >= len(params) {
 		return def
 	}
-	v := paramVal(params[idx], 0)
+	v := paramVal(params[idx])
 	if v == 0 {
 		return def
 	}
 	return v
 }
 
-// max1 returns param idx as an int, minimum 1.
-func max1(params [][]uint16, idx int) int {
-	v := int(p1(params, idx, 1))
+// max1 returns the first CSI parameter as an int, minimum 1.
+func max1(params [][]uint16) int {
+	v := int(p1(params, 0, 1))
 	if v < 1 {
 		return 1
 	}

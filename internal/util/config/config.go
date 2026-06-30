@@ -90,11 +90,16 @@ type Keybinding struct {
 	Action string // "Paste" | "Copy" | "ScrollUp" | "ScrollDown"
 }
 
+const (
+	modCtrl  = "Ctrl"
+	modShift = "Shift"
+)
+
 // Load reads the config file at path and merges it over Defaults().
 // A missing file is not an error — defaults are returned.
 func Load(path string) (*Config, error) {
 	cfg := Defaults()
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // config path is chosen by the user or DefaultPath()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return cfg, nil
@@ -165,10 +170,10 @@ func Defaults() *Config {
 		Scrollback: ScrollbackConfig{Lines: 10000},
 		Cursor:     CursorConfig{Shape: "block"},
 		Keybindings: []Keybinding{
-			{Key: "v", Mods: []string{"Ctrl", "Shift"}, Action: "Paste"},
-			{Key: "c", Mods: []string{"Ctrl", "Shift"}, Action: "Copy"},
-			{Key: "Up", Mods: []string{"Ctrl", "Shift"}, Action: "ScrollUp"},
-			{Key: "Down", Mods: []string{"Ctrl", "Shift"}, Action: "ScrollDown"},
+			{Key: "v", Mods: []string{modCtrl, modShift}, Action: "Paste"},
+			{Key: "c", Mods: []string{modCtrl, modShift}, Action: "Copy"},
+			{Key: "Up", Mods: []string{modCtrl, modShift}, Action: "ScrollUp"},
+			{Key: "Down", Mods: []string{modCtrl, modShift}, Action: "ScrollDown"},
 		},
 	}
 }

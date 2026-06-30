@@ -29,7 +29,7 @@ func encode(key gpucontext.Key, mods gpucontext.Modifiers, appCursor bool) []byt
 	return nil
 }
 
-// withAlt prepends ESC when Alt is held, matching xterm behaviour.
+// withAlt prepends ESC when Alt is held, matching xterm behavior.
 func withAlt(mods gpucontext.Modifiers, seq string) []byte {
 	if mods.HasAlt() {
 		return append([]byte{0x1b}, []byte(seq)...)

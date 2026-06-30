@@ -37,7 +37,7 @@ func Open(cfg Config) (PTY, error) {
 		env = os.Environ()
 	}
 
-	cmd := exec.Command(command[0], command[1:]...) //nolint:gosec // PTY intentionally launches arbitrary user-supplied commands
+	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = env
 	cmd.Dir = dir
 

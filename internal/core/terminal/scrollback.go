@@ -10,11 +10,11 @@ type Scrollback struct {
 	cap  int
 }
 
-func newScrollback(cap int) *Scrollback {
-	if cap < 1 {
-		cap = 1
+func newScrollback(capacity int) *Scrollback {
+	if capacity < 1 {
+		capacity = 1
 	}
-	return &Scrollback{buf: make([][]Cell, cap), cap: cap}
+	return &Scrollback{buf: make([][]Cell, capacity), cap: capacity}
 }
 
 // Push copies line into the ring buffer, evicting the oldest entry when full.

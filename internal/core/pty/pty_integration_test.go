@@ -39,7 +39,7 @@ func drainPTY(p pty.PTY, timeout time.Duration) (string, bool) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		io.Copy(&buf, p) //nolint:errcheck
+		_, _ = io.Copy(&buf, p)
 	}()
 	select {
 	case <-done:

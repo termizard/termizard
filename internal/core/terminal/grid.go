@@ -185,7 +185,7 @@ func (g *Grid) resize(newCols, newRows, cursorRow, cursorCol int, savedLines [][
 
 		// Trim trailing blank cells so short lines don't produce an extra
 		// soft-wrap after re-breaking. Only unstyled blankCell is trimmed;
-		// styled spaces (coloured backgrounds etc.) are left untouched.
+		// styled spaces (colored backgrounds etc.) are left untouched.
 		end := len(cells)
 		for end > 0 && cells[end-1] == blankCell {
 			end--
@@ -196,9 +196,9 @@ func (g *Grid) resize(newCols, newRows, cursorRow, cursorCol int, savedLines [][
 
 	// Restore logical lines that were scrolled off during a previous narrow reflow.
 	if len(savedLines) > 0 {
-		restored := make([]logLine, len(savedLines))
-		for i, cells := range savedLines {
-			restored[i] = logLine{cells: cells, cursorOffset: -1}
+		restored := make([]logLine, 0, len(savedLines))
+		for _, cells := range savedLines {
+			restored = append(restored, logLine{cells: cells, cursorOffset: -1})
 		}
 		logicals = append(restored, logicals...)
 	}
@@ -324,10 +324,7 @@ func (g *Grid) resize(newCols, newRows, cursorRow, cursorCol int, savedLines [][
 		pos := rowsToSkip * newCols // byte offset into cells for the first visible row
 		lineStartNewRow := newRow
 
-		for {
-			if newRow >= newRows {
-				break
-			}
+		for newRow < newRows {
 			n := newCols
 			if rem := len(cells) - pos; rem < n {
 				n = rem

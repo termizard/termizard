@@ -11,7 +11,7 @@ func applySGR(s *screen, params [][]uint16) {
 	}
 	i := 0
 	for i < len(params) {
-		v := paramVal(params[i], 0)
+		v := paramVal(params[i])
 		switch v {
 		case 0:
 			s.resetPen()
@@ -88,26 +88,26 @@ func parseExtColor(params [][]uint16, i int) (Color, int) {
 	if i+1 >= len(params) {
 		return Color{}, 0
 	}
-	switch paramVal(params[i+1], 0) {
+	switch paramVal(params[i+1]) {
 	case 5:
 		if i+2 < len(params) {
-			return Indexed(uint8(paramVal(params[i+2], 0))), 2
+			return Indexed(uint8(paramVal(params[i+2]))), 2
 		}
 	case 2:
 		if i+4 < len(params) {
-			r := uint8(paramVal(params[i+2], 0))
-			g := uint8(paramVal(params[i+3], 0))
-			b := uint8(paramVal(params[i+4], 0))
+			r := uint8(paramVal(params[i+2]))
+			g := uint8(paramVal(params[i+3]))
+			b := uint8(paramVal(params[i+4]))
 			return RGB(r, g, b), 4
 		}
 	}
 	return Color{}, 0
 }
 
-// paramVal returns sub-param j of p, defaulting to 0 if out of range.
-func paramVal(p []uint16, j int) uint16 {
-	if j < len(p) {
-		return p[j]
+// paramVal returns the first CSI parameter, defaulting to 0 if empty.
+func paramVal(p []uint16) uint16 {
+	if len(p) > 0 {
+		return p[0]
 	}
 	return 0
 }

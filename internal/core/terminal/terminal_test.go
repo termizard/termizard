@@ -102,7 +102,7 @@ func TestSGRTrueColor(t *testing.T) {
 	if c.FG.Kind != terminal.ColorRGB {
 		t.Fatalf("expected ColorRGB, got %v", c.FG.Kind)
 	}
-	if c.FG.Value != (255<<16 | 128<<8 | 0) {
+	if c.FG.Value != 255<<16|128<<8 {
 		t.Fatalf("expected RGB(255,128,0), got 0x%06X", c.FG.Value)
 	}
 }
@@ -255,7 +255,7 @@ func TestScrollbackPush(t *testing.T) {
 		t.Fatal("expected scrollback to be non-empty")
 	}
 	line := term.ScrollbackLine(term.ScrollbackLen() - 1)
-	if line == nil || line[0].Char != 'A' {
+	if len(line) == 0 || line[0].Char != 'A' {
 		t.Fatalf("scrollback oldest line: want 'A', got %v", line)
 	}
 }
