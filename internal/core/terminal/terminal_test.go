@@ -1,6 +1,7 @@
 package terminal_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/termizard/termizard/internal/core/terminal"
@@ -101,7 +102,7 @@ func TestSGRTrueColor(t *testing.T) {
 	if c.FG.Kind != terminal.ColorRGB {
 		t.Fatalf("expected ColorRGB, got %v", c.FG.Kind)
 	}
-	if c.FG.Value != (255<<16|128<<8|0) {
+	if c.FG.Value != (255<<16 | 128<<8 | 0) {
 		t.Fatalf("expected RGB(255,128,0), got 0x%06X", c.FG.Value)
 	}
 }
@@ -387,6 +388,212 @@ func TestDL(t *testing.T) {
 	feed(t, term, "\x1b[1M")   // delete 1 line
 	if c := cellAt(t, term, 1, 0); c.Char != 'C' {
 		t.Fatalf("DL: row1 should be 'C' after delete, got %q", c.Char)
+	}
+}
+
+// ── Resize: column overflow preservation ─────────────────────────────────────
+
+// TestResizePreservesOverflowCols verifies that shrinking the column count does
+// not permanently discard cells beyond the new display width. Content written
+// when the grid was wider must survive a shrink-then-expand cycle — this is the
+// "matrix" storage model that prevents truncation during transient wrong-size
+// resize events (e.g. wrong dc.Width() on first draw frame).
+func TestResizePreservesOverflowCols(t *testing.T) {
+	// 70-col terminal; position cursor at col 50 and write a sentinel char.
+	term := newTerm(70, 5)
+	feed(t, term, "\x1b[1;51H") // CUP row=1 col=51 (1-based) → row=0, col=50
+	feed(t, term, "Z")
+
+	if c := cellAt(t, term, 0, 50); c.Char != 'Z' {
+		t.Fatalf("before resize: want 'Z' at (0,50) got %q", c.Char)
+	}
+
+	// Shrink to 35 cols — 'Z' at col 50 is now beyond the display width.
+	term.Resize(35, 5)
+	if c := term.Cols(); c != 35 {
+		t.Fatalf("after shrink: want 35 cols got %d", c)
+	}
+
+	// Expand back to 70 cols — 'Z' must still be at col 50.
+	term.Resize(70, 5)
+	if c := cellAt(t, term, 0, 50); c.Char != 'Z' {
+		t.Fatalf("after expand: want 'Z' at (0,50) preserved, got %q", c.Char)
+	}
+}
+
+// ── Resize: soft-wrap reflow ──────────────────────────────────────────────────
+
+// TestSoftWrapMergeOnExpand verifies that expanding the column count merges
+// soft-wrapped continuation rows back into a single logical line. A 75-char
+// string written to a 70-col terminal occupies two visual rows (70 + 5). After
+// widening to 80 cols, all 75 chars must appear on row 0 and row 1 must be blank.
+func TestSoftWrapMergeOnExpand(t *testing.T) {
+	term := newTerm(70, 10)
+	feed(t, term, strings.Repeat("A", 75))
+
+	if c := cellAt(t, term, 0, 69); c.Char != 'A' {
+		t.Fatalf("before resize: want 'A' at (0,69) got %q", c.Char)
+	}
+	if c := cellAt(t, term, 1, 4); c.Char != 'A' {
+		t.Fatalf("before resize: want 'A' at (1,4) got %q", c.Char)
+	}
+
+	term.Resize(80, 10)
+
+	for col := 0; col < 75; col++ {
+		if c := cellAt(t, term, 0, col); c.Char != 'A' {
+			t.Fatalf("after expand: want 'A' at (0,%d) got %q", col, c.Char)
+		}
+	}
+	if c := cellAt(t, term, 1, 0); c.Char != ' ' {
+		t.Fatalf("after expand: row 1 col 0 should be blank, got %q", c.Char)
+	}
+}
+
+// TestSoftWrapRewrapOnShrink verifies that shrinking breaks a long line into
+// multiple wrapped rows so no content is lost.
+func TestSoftWrapRewrapOnShrink(t *testing.T) {
+	term := newTerm(80, 10)
+	feed(t, term, strings.Repeat("B", 75))
+
+	term.Resize(40, 10)
+
+	// First 40 B's on row 0, next 35 B's on row 1.
+	for col := 0; col < 40; col++ {
+		if c := cellAt(t, term, 0, col); c.Char != 'B' {
+			t.Fatalf("after shrink: want 'B' at (0,%d) got %q", col, c.Char)
+		}
+	}
+	for col := 0; col < 35; col++ {
+		if c := cellAt(t, term, 1, col); c.Char != 'B' {
+			t.Fatalf("after shrink: want 'B' at (1,%d) got %q", col, c.Char)
+		}
+	}
+	if c := cellAt(t, term, 1, 35); c.Char != ' ' {
+		t.Fatalf("after shrink: col 35 row 1 should be blank, got %q", c.Char)
+	}
+}
+
+// TestResizeRejoinsSplitWord verifies that a logical line split across saved
+// prefix and visible grid tail (e.g. "Mov" + "ies") is rejoined on expand.
+func TestResizeRejoinsSplitWord(t *testing.T) {
+	term := newTerm(80, 5)
+	line := strings.Repeat("x", 65) + "Movies"
+	feed(t, term, line)
+
+	term.Resize(20, 5)
+	term.Resize(80, 5)
+
+	var text strings.Builder
+	for row := 0; row < 5; row++ {
+		for col := 0; col < 80; col++ {
+			c := cellAt(t, term, row, col)
+			if c.Char != 0 && c.Char != ' ' {
+				text.WriteRune(c.Char)
+			}
+		}
+	}
+	got := text.String()
+	if !strings.Contains(got, "Movies") {
+		t.Fatalf("want intact Movies in %q", got)
+	}
+	if strings.Contains(got, "Mov") && strings.Contains(got, "ies") && !strings.Contains(got, "Movies") {
+		t.Fatalf("Movies split across rows: %q", got)
+	}
+}
+
+// TestResizeLsStyleOutput simulates directory listing lines that must stay
+// separate across narrow→wide resize cycles.
+func TestResizeLsStyleOutput(t *testing.T) {
+	term := newTerm(120, 24)
+	lines := "total 88\r\n" +
+		"drwx------@  Desktop\r\n" +
+		"drwx------+  Dev\r\n" +
+		"drwx------@  Documents\r\n" +
+		"drwx------@  Downloads\r\n" +
+		"drwx------   Library\r\n"
+	feed(t, term, lines)
+
+	term.Resize(40, 24)
+	term.Resize(120, 24)
+
+	for row, want := range []string{"total", "drwx", "drwx", "drwx", "drwx", "drwx"} {
+		c := cellAt(t, term, row, 0)
+		if c.Char != rune(want[0]) {
+			t.Fatalf("row %d: want line starting with %q, got %q", row, want, string(c.Char))
+		}
+	}
+}
+
+// TestResizePreservesMultipleLinesOnExpand verifies that hard line breaks are
+// not merged when reflow overflow is saved and restored across resize cycles.
+func TestResizePreservesMultipleLinesOnExpand(t *testing.T) {
+	term := newTerm(80, 5)
+	feed(t, term, "AAAAA\r\nBBBBB\r\n"+strings.Repeat("C", 30)+"\r\nDDDDD\r\n")
+
+	term.Resize(10, 5) // line C wraps; 6 visual rows → skip 1
+	term.Resize(80, 5)
+
+	if c := cellAt(t, term, 0, 0); c.Char != 'A' {
+		t.Fatalf("row0 want A got %q", c.Char)
+	}
+	if c := cellAt(t, term, 1, 0); c.Char != 'B' {
+		t.Fatalf("row1 want B got %q", c.Char)
+	}
+	for row := 0; row < 5; row++ {
+		if cellAt(t, term, row, 0).Char == 'D' {
+			if cellAt(t, term, row, 4).Char != 'D' {
+				t.Fatalf("row%d: DDDDD corrupted: %q", row, cellAt(t, term, row, 0).Char)
+			}
+			return
+		}
+	}
+	t.Fatal("DDDDD row not found")
+}
+
+// TestSoftWrapExpandRestoresAfterOverflowShrink verifies that reflow overflow
+// during a width shrink does not permanently discard the top of long lines.
+// When the window is widened again, the full line must reappear on screen.
+func TestSoftWrapExpandRestoresAfterOverflowShrink(t *testing.T) {
+	term := newTerm(80, 5)
+	feed(t, term, strings.Repeat("X", 200))
+
+	term.Resize(30, 5) // 7 visual rows needed at 30 cols; 2 scroll off
+	term.Resize(80, 5) // merge back to 3 rows; all 200 chars must be visible
+
+	count := 0
+	for row := 0; row < 5; row++ {
+		for col := 0; col < 80; col++ {
+			if cellAt(t, term, row, col).Char == 'X' {
+				count++
+			}
+		}
+	}
+	if count != 200 {
+		t.Fatalf("after shrink→expand: want 200 X cells visible, got %d", count)
+	}
+	if c := cellAt(t, term, 0, 0); c.Char != 'X' {
+		t.Fatalf("after shrink→expand: row0 col0 want 'X' got %q", c.Char)
+	}
+}
+
+// TestSoftWrapRoundTrip verifies a shrink→expand cycle fully restores the
+// original row layout from reflowed content.
+func TestSoftWrapRoundTrip(t *testing.T) {
+	term := newTerm(80, 10)
+	feed(t, term, strings.Repeat("C", 75))
+
+	term.Resize(40, 10)
+	term.Resize(80, 10)
+
+	// All 75 C's back on row 0.
+	for col := 0; col < 75; col++ {
+		if c := cellAt(t, term, 0, col); c.Char != 'C' {
+			t.Fatalf("after round-trip: want 'C' at (0,%d) got %q", col, c.Char)
+		}
+	}
+	if c := cellAt(t, term, 1, 0); c.Char != ' ' {
+		t.Fatalf("after round-trip: row 1 should be blank, got %q", c.Char)
 	}
 }
 

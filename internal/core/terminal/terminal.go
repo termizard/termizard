@@ -26,6 +26,14 @@ type Terminal struct {
 
 	scrollback *Scrollback
 
+	// reflowSavedLines holds logical lines scrolled off the top during a width
+	// reflow that did not fit in the row budget. Prepended on the next resize so
+	// expanding the window can restore them without merging unrelated rows.
+	reflowSavedLines [][]Cell
+	// reflowGridContinues is true when the first visible row in the grid is the
+	// tail of a logical line whose head was saved in reflowSavedLines.
+	reflowGridContinues bool
+
 	title   string
 	onTitle func(string) // called on OSC 0/2 title change
 	onBell  func()       // called on BEL
@@ -113,12 +121,39 @@ func (t *Terminal) SetOnBell(fn func()) {
 }
 
 // Resize adjusts both screens and moves the cursor into bounds.
+// When the primary screen shrinks in height, lines that would hide the cursor
+// are pushed into the scrollback buffer so they remain accessible.
 func (t *Terminal) Resize(cols, rows int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Keep the cursor visible when shrinking: scroll the primary grid up and
+	// save displaced lines to scrollback, then resize normally.
+	if t.active == t.primary && rows < t.primary.rows() {
+		curRow := t.primary.cursor.row
+		if curRow >= rows {
+			scroll := curRow - (rows - 1)
+			oldRows := t.primary.rows()
+			for i := 0; i < scroll; i++ {
+				t.scrollback.Push(t.primary.grid.line(i))
+			}
+			t.primary.grid.scrollUp(0, oldRows-1, scroll)
+			t.primary.cursor.row -= scroll
+		}
+	}
+
 	onAlt := t.active == t.alt
-	t.primary = t.primary.resize(cols, rows)
-	t.alt = t.alt.resize(cols, rows)
+
+	primary, saved, sbLines, continues := t.primary.resize(cols, rows, t.reflowSavedLines, t.reflowGridContinues)
+	t.reflowSavedLines = saved
+	t.reflowGridContinues = continues
+	for _, line := range sbLines {
+		t.scrollback.Push(line)
+	}
+	t.primary = primary
+
+	t.alt, _, _, _ = t.alt.resize(cols, rows, nil, false)
+
 	if onAlt {
 		t.active = t.alt
 	} else {
@@ -144,6 +179,8 @@ func (t *Terminal) Print(r rune) {
 
 	// Pending-wrap: cursor was at the last column; wrap now before placing char.
 	if s.pendingWrap && t.autoWrap {
+		// Mark the row we're about to leave so reflow can rejoin it later.
+		s.grid.markWrapped(s.cursor.row)
 		s.cursor.col = 0
 		t.newline(false) // CR+LF semantics for wrap
 	}
@@ -153,6 +190,7 @@ func (t *Terminal) Print(r rune) {
 	if w == 2 && s.cursor.col == s.cols()-1 {
 		s.grid.setCell(s.cursor.row, s.cursor.col, s.pen(' ', 1))
 		if t.autoWrap {
+			s.grid.markWrapped(s.cursor.row)
 			s.cursor.col = 0
 			t.newline(false)
 		}
@@ -461,8 +499,8 @@ func (t *Terminal) OSC(params [][]byte, _ bool) {
 
 // DCS / DCSPut / DCSUnhook — not used in MVP; satisfy the interface.
 func (t *Terminal) DCS(_ [][]uint16, _ []byte, _ bool, _ rune) {}
-func (t *Terminal) DCSPut(_ byte)                               {}
-func (t *Terminal) DCSUnhook()                                  {}
+func (t *Terminal) DCSPut(_ byte)                              {}
+func (t *Terminal) DCSUnhook()                                 {}
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 

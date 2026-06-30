@@ -2,21 +2,21 @@ package terminal
 
 // cursorState holds the cursor position and the state saved by DECSC.
 type cursorState struct {
-	row, col    int
-	visible     bool
+	row, col int
+	visible  bool
 	// saved by DECSC (ESC 7 / CSI s)
-	savedRow    int
-	savedCol    int
-	savedFG     Color
-	savedBG     Color
-	savedAttrs  Attrs
+	savedRow   int
+	savedCol   int
+	savedFG    Color
+	savedBG    Color
+	savedAttrs Attrs
 }
 
 // screen is one of the two independent grids (primary / alternate).
 // It owns a grid, a cursor, the SGR pen state, and the scroll region.
 type screen struct {
-	grid      *Grid
-	cursor    cursorState
+	grid   *Grid
+	cursor cursorState
 	// scroll region (DECSTBM); both inclusive, 0-based
 	scrollTop int
 	scrollBot int
@@ -86,11 +86,16 @@ func (s *screen) restoreCursor() {
 	s.pendingWrap = false
 }
 
-// resize returns a new screen with dimensions (cols, rows), carrying over
-// as much of the existing grid content as fits.
-func (s *screen) resize(cols, rows int) *screen {
+// resize returns a new screen with dimensions (cols, rows).
+// Content is reflowed at the new column count: logical lines (runs of
+// soft-wrapped rows) are re-broken so expanding the terminal merges orphaned
+// continuation rows, and shrinking re-wraps content that no longer fits.
+func (s *screen) resize(cols, rows int, savedLines [][]Cell, gridContinues bool) (*screen, [][]Cell, [][]Cell, bool) {
+	newGrid, newCurRow, newCurCol, saved, sbLines, continues := s.grid.resize(
+		cols, rows, s.cursor.row, s.cursor.col, savedLines, gridContinues,
+	)
 	ns := &screen{
-		grid:      s.grid.resize(cols, rows),
+		grid:      newGrid,
 		scrollTop: 0,
 		scrollBot: rows - 1,
 		fg:        s.fg,
@@ -99,13 +104,8 @@ func (s *screen) resize(cols, rows int) *screen {
 	}
 	ns.cursor = s.cursor
 	ns.cursor.visible = s.cursor.visible
-	// Clamp cursor into the new bounds
-	if ns.cursor.row >= rows {
-		ns.cursor.row = rows - 1
-	}
-	if ns.cursor.col >= cols {
-		ns.cursor.col = cols - 1
-	}
+	ns.cursor.row = newCurRow
+	ns.cursor.col = newCurCol
 	ns.pendingWrap = false
-	return ns
+	return ns, saved, sbLines, continues
 }
