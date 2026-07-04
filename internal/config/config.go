@@ -133,10 +133,19 @@ func Load(path string) (*Config, error) {
 
 // DefaultPath returns the XDG-compliant config file path.
 func DefaultPath() string {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".config")
+	return filepath.Join(configHome(), "termizard", "config.toml")
+}
+
+func configHome() string {
+	if base := os.Getenv("XDG_CONFIG_HOME"); base != "" {
+		return base
 	}
-	return filepath.Join(base, "termizard", "config.toml")
+	if home := os.Getenv("HOME"); home != "" {
+		return filepath.Join(home, ".config")
+	}
+	if home := os.Getenv("USERPROFILE"); home != "" {
+		return filepath.Join(home, ".config")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config")
 }

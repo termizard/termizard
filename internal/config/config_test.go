@@ -123,6 +123,7 @@ func TestDefaultPathFallbackHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	got := config.DefaultPath()
 	want := filepath.Join(home, ".config", "termizard", "config.toml")

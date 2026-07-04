@@ -108,12 +108,15 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: go vet ${{ env.GO_CORE_PACKAGES }}
 
-    - name: Install race detector
-      run: go install github.com/kolkov/racedetector/cmd/racedetector@latest
-
     - name: Run tests with race detector
       shell: bash
-      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_CORE_PACKAGES }}
+      run: |
+        FLAGS="-parallel 1 -coverprofile=coverage.txt -covermode=atomic"
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          go test $FLAGS ${{ env.GO_CORE_PACKAGES }}
+        else
+          go test -race $FLAGS ${{ env.GO_CORE_PACKAGES }}
+        fi
 
     - name: Verify coverage file
       if: matrix.os == 'ubuntu-latest'

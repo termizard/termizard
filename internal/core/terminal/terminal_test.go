@@ -25,15 +25,11 @@ func feed(t *testing.T, term *terminal.Terminal, data string) {
 // cellAt returns the cell at (row,col) from the terminal.
 func cellAt(t *testing.T, term *terminal.Terminal, row, col int) terminal.Cell {
 	t.Helper()
-	term.RLock()
-	defer term.RUnlock()
 	return term.Cell(row, col)
 }
 
 func cursorAt(t *testing.T, term *terminal.Terminal) (col, row int) {
 	t.Helper()
-	term.RLock()
-	defer term.RUnlock()
 	return term.CursorPos()
 }
 
@@ -287,9 +283,7 @@ func TestResize(t *testing.T) {
 	term := newTerm(80, 24)
 	feed(t, term, "Hello")
 	term.Resize(40, 12)
-	term.RLock()
 	cols, rows := term.Cols(), term.Rows()
-	term.RUnlock()
 	if cols != 40 || rows != 12 {
 		t.Fatalf("after resize want (40,12) got (%d,%d)", cols, rows)
 	}
@@ -306,9 +300,7 @@ func TestOSCTitle(t *testing.T) {
 	var cbTitle string
 	term.SetOnTitle(func(s string) { cbTitle = s })
 	feed(t, term, "\x1b]0;My Terminal\x07") // onTitle called synchronously by feed
-	term.RLock()
 	title := term.Title()
-	term.RUnlock()
 	if title != "My Terminal" {
 		t.Fatalf("title want %q got %q", "My Terminal", title)
 	}
@@ -348,20 +340,16 @@ func TestDirtyTracking(t *testing.T) {
 	term := newTerm(80, 24)
 	// Print to row 0 only
 	feed(t, term, "X")
-	term.RLock()
 	dirty0 := term.IsDirty(0)
 	dirty1 := term.IsDirty(1)
-	term.RUnlock()
 	if !dirty0 {
 		t.Fatal("row 0 should be dirty after print")
 	}
 	if dirty1 {
 		t.Fatal("row 1 should not be dirty")
 	}
-	term.RLock()
 	term.ClearDirty()
 	dirty0after := term.IsDirty(0)
-	term.RUnlock()
 	if dirty0after {
 		t.Fatal("row 0 should not be dirty after ClearDirty")
 	}

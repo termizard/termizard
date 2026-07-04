@@ -72,42 +72,82 @@ func New(cols, rows, scrollbackLines int, reflowOnResize bool) *Terminal {
 	return t
 }
 
-// ── Public read API (renderer calls these under RLock) ──────────────────────
+// ── Public read API ─────────────────────────────────────────────────────────
 
-// RLock / RUnlock expose the read lock so the renderer can snapshot
-// multiple fields atomically without going through an accessor per call.
+// RLock / RUnlock allow callers to hold a read lock across multiple reads
+// without re-locking per accessor. Do not call these while already holding
+// the read lock via the accessors below.
 func (t *Terminal) RLock()   { t.mu.RLock() }
 func (t *Terminal) RUnlock() { t.mu.RUnlock() }
 
-func (t *Terminal) Cols() int { return t.active.cols() }
-func (t *Terminal) Rows() int { return t.active.rows() }
+func (t *Terminal) Cols() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.active.cols()
+}
+
+func (t *Terminal) Rows() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.active.rows()
+}
 
 // Cell returns the cell at (row, col) in the active screen.
-func (t *Terminal) Cell(row, col int) Cell { return t.active.grid.Cell(row, col) }
+func (t *Terminal) Cell(row, col int) Cell {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.active.grid.Cell(row, col)
+}
 
 // IsDirty reports whether row has changed since the last ClearDirty call.
-func (t *Terminal) IsDirty(row int) bool { return t.active.grid.IsDirty(row) }
+func (t *Terminal) IsDirty(row int) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.active.grid.IsDirty(row)
+}
 
 // ClearDirty resets all dirty flags. Call after each rendered frame.
-func (t *Terminal) ClearDirty() { t.active.grid.ClearDirty() }
+func (t *Terminal) ClearDirty() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.active.grid.ClearDirty()
+}
 
 // CursorPos returns the cursor's (col, row) in the active screen.
 func (t *Terminal) CursorPos() (col, row int) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	return t.active.cursor.col, t.active.cursor.row
 }
 
 // CursorVisible reports whether the cursor should be drawn.
-func (t *Terminal) CursorVisible() bool { return t.active.cursor.visible }
+func (t *Terminal) CursorVisible() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.active.cursor.visible
+}
 
 // Title returns the last window title set via OSC 0/2.
-func (t *Terminal) Title() string { return t.title }
+func (t *Terminal) Title() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.title
+}
 
 // AppCursorKeys reports whether DECCKM application cursor-key mode is active.
 // The frontend uses this to choose between \x1b[A and \x1bOA for arrow keys.
-func (t *Terminal) AppCursorKeys() bool { return t.appCursorKeys }
+func (t *Terminal) AppCursorKeys() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.appCursorKeys
+}
 
 // BracketedPaste reports whether bracketed paste mode is active.
-func (t *Terminal) BracketedPaste() bool { return t.bracketedPaste }
+func (t *Terminal) BracketedPaste() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.bracketedPaste
+}
 
 // SetOnTitle registers a callback for OSC title changes. Safe to call before
 // any PTY data arrives.
@@ -163,10 +203,18 @@ func (t *Terminal) Resize(cols, rows int) {
 }
 
 // ScrollbackLine returns the line at scrollback index idx (0 = most recent).
-func (t *Terminal) ScrollbackLine(idx int) []Cell { return t.scrollback.Line(idx) }
+func (t *Terminal) ScrollbackLine(idx int) []Cell {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.scrollback.Line(idx)
+}
 
 // ScrollbackLen returns the number of lines in the scrollback buffer.
-func (t *Terminal) ScrollbackLen() int { return t.scrollback.Len() }
+func (t *Terminal) ScrollbackLen() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.scrollback.Len()
+}
 
 // ── vte.Performer ────────────────────────────────────────────────────────────
 
