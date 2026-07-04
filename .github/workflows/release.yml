@@ -97,7 +97,26 @@ jobs:
           cache-dependency-path: internal/ui/wails/frontend/package-lock.json
 
       - name: Install NSIS
-        run: choco install nsis -y
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $nsisCandidates = @(
+            "${env:ProgramFiles(x86)}\NSIS",
+            "$env:ProgramFiles\NSIS"
+          )
+          $nsisDir = $null
+          foreach ($dir in $nsisCandidates) {
+            if (Test-Path "$dir\makensis.exe") {
+              $nsisDir = $dir
+              break
+            }
+          }
+          if (-not $nsisDir) {
+            throw "makensis.exe not found after NSIS install"
+          }
+          Write-Host "NSIS directory: $nsisDir"
+          Add-Content -Path $env:GITHUB_PATH -Value $nsisDir
+          & "$nsisDir\makensis.exe" /VERSION
 
       - name: Install build tools
         shell: bash
@@ -107,7 +126,12 @@ jobs:
 
       - name: Build NSIS installer (desktop + Start Menu shortcuts)
         shell: bash
-        run: task windows:package ARCH=amd64 INSTALL_SCOPE=user
+        run: |
+          if ! command -v makensis >/dev/null 2>&1; then
+            export PATH="/c/Program Files (x86)/NSIS:/c/Program Files/NSIS:$PATH"
+          fi
+          makensis /VERSION
+          task windows:package ARCH=amd64 INSTALL_SCOPE=user
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
