@@ -2,6 +2,7 @@ package pty
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -91,6 +92,25 @@ func mergePATH(m map[string]string) {
 
 func standardPathEntries() []string {
 	home, _ := os.UserHomeDir()
+	if runtime.GOOS == "windows" {
+		entries := []string{}
+		if home != "" {
+			entries = append(entries,
+				filepath.Join(home, "AppData", "Local", "Microsoft", "WindowsApps"),
+				filepath.Join(home, "bin"),
+			)
+		}
+		sysRoot := os.Getenv("SystemRoot")
+		if sysRoot == "" {
+			sysRoot = `C:\Windows`
+		}
+		entries = append(entries,
+			filepath.Join(sysRoot, "System32"),
+			filepath.Join(sysRoot, "System32", "WindowsPowerShell", "v1.0"),
+		)
+		return entries
+	}
+
 	entries := []string{
 		"/opt/homebrew/bin",
 		"/opt/homebrew/sbin",

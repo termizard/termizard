@@ -1,6 +1,8 @@
 package pty
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -36,16 +38,61 @@ func TestPrepareShellEnvPreservesExistingTerm(t *testing.T) {
 }
 
 func TestPrepareShellEnvMergesPATH(t *testing.T) {
-	env := PrepareShellEnv([]string{"PATH=/custom/bin", "HOME=/x"})
+	customDir := t.TempDir()
+	customBin := filepath.Join(customDir, "custom", "bin")
+	if err := os.MkdirAll(customBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := PrepareShellEnv([]string{"PATH=" + customBin, "HOME=" + customDir})
 	path := envMap(env)["PATH"]
-	if !strings.Contains(path, "/custom/bin") {
-		t.Fatalf("PATH %q missing /custom/bin", path)
+	if !strings.Contains(path, customBin) {
+		t.Fatalf("PATH %q missing %q", path, customBin)
 	}
-	if !strings.Contains(path, "/usr/bin") {
-		t.Fatalf("PATH %q missing /usr/bin", path)
-	}
-	if strings.Index(path, "/custom/bin") > strings.Index(path, "/usr/bin") {
+
+	parts := strings.Split(path, string(os.PathListSeparator))
+	if parts[0] != customBin {
 		t.Fatalf("custom PATH entries should come first, got %q", path)
+	}
+	if len(parts) < 2 {
+		t.Fatal("expected standard PATH entries to be merged")
+	}
+
+	merged := false
+	for _, p := range parts[1:] {
+		info, err := os.Stat(p)
+		if err == nil && info.IsDir() {
+			merged = true
+			break
+		}
+	}
+	if !merged {
+		t.Fatalf("expected at least one standard PATH directory, got %q", path)
+	}
+}
+
+func TestClampSize(t *testing.T) {
+	cols, rows := ClampSize(0, 0)
+	if cols != 1 || rows != 1 {
+		t.Fatalf("ClampSize(0,0) = (%d,%d), want (1,1)", cols, rows)
+	}
+
+	cols, rows = ClampSize(120, 40)
+	if cols != 120 || rows != 40 {
+		t.Fatalf("ClampSize(120,40) = (%d,%d), want (120,40)", cols, rows)
+	}
+
+	cols, rows = ClampSize(70000, 80000)
+	if cols != 65535 || rows != 65535 {
+		t.Fatalf("ClampSize overflow = (%d,%d), want (65535,65535)", cols, rows)
+	}
+}
+
+func TestPrepareShellEnvNilUsesProcessEnv(t *testing.T) {
+	t.Setenv("TERM", "vt100")
+	env := PrepareShellEnv(nil)
+	if envMap(env)["TERM"] != "vt100" {
+		t.Fatalf("TERM = %q, want vt100", envMap(env)["TERM"])
 	}
 }
 

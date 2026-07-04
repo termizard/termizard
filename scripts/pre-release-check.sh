@@ -206,10 +206,10 @@ log_info "Checking test coverage..."
 COVERAGE=$(go test -count=1 -cover $GO_CORE_PACKAGES 2>&1 | grep "coverage:" | tail -1 | awk -F'coverage: ' '{print $2}' | awk '{print $1}' | sed 's/%//')
 if [ -n "$COVERAGE" ]; then
     echo "  overall coverage: ${COVERAGE}%"
-    if awk -v cov="$COVERAGE" 'BEGIN {exit !(cov >= 70.0)}'; then
-        log_success "Coverage meets requirement (>70%)"
+    if awk -v cov="$COVERAGE" 'BEGIN {exit !(cov >= 85.0)}'; then
+        log_success "Coverage meets requirement (>85%)"
     else
-        log_warning "Coverage below 70% (${COVERAGE}%) - acceptable for early versions"
+        log_warning "Coverage below 85% (${COVERAGE}%)"
         WARNINGS=$((WARNINGS + 1))
     fi
 else
