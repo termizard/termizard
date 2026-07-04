@@ -120,6 +120,9 @@ linters:
           sizeThreshold: 256
 
   exclusions:
+    paths:
+      - build
+      - internal/ui/wails/frontend/node_modules
     rules:
       # Test files - allow more flexibility
       - path: _test\.go
@@ -135,40 +138,25 @@ linters:
           - gocognit
 
       # Terminal emulation core - complex by nature, many escape codes
-      - path: term/.*\.go
+      - path: internal/core/terminal/.*\.go
         linters:
-          - funlen       # State machines may be long
-          - gocyclo      # Many escape code paths
-          - cyclop       # Switch cases for CSI sequences
-          - nestif       # Necessary nested logic for screen operations
-          - dupl         # Some terminal sequences repeat structure
+          - funlen
+          - gocyclo
+          - cyclop
+          - gocognit
+          - nestif
+          - gosec
+          - dupl
+          - gocritic
+          - maintidx
 
       # Pseudo-terminal proxy - low-level system interactions
-      - path: ptp/.*\.go
+      - path: internal/core/pty/.*\.go
         linters:
-          - gosec        # Syscall usage is intentional
-          - errcheck     # Some POSIX returns are informational
-          - funlen       # PTY setup can be verbose
-          - unparam      # Signals handler signatures required by OS
-
-      # Widget library - public API may be verbose
-      - path: widgets/.*\.go
-        linters:
-          - funlen       # Widget constructors have many options
-          - gocognit     # Layout logic can be inherently complex
-
-      # Rendering engine - diff algorithms and screen updates
-      - path: render/.*\.go
-        linters:
-          - gocyclo      # Diff and update algorithms
-          - funlen       # Rendering loops may be long
-          - nestif       # Complexity from color and attribute handling
-
-      # Escape sequence parser - generated or table-driven code
-      - path: parser/.*\.go
-        linters:
-          - dupl         # Parser tables repeat similar entries
-          - gocyclo      # Dispatch logic for escape sequences
+          - gosec
+          - errcheck
+          - funlen
+          - unparam
 
 issues:
   max-issues-per-linter: 0

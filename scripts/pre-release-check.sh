@@ -12,6 +12,9 @@
 
 set -e  # Exit on first error
 
+GO_PACKAGES="./cmd/... ./internal/..."
+GO_CORE_PACKAGES="./internal/adapter/... ./internal/config/... ./internal/core/... ./internal/ui/mock/... ./internal/util/..."
+
 # Handle GOROOT for Windows with multiple Go versions
 if [[ -n "$GOROOT" ]]; then
     export PATH="$GOROOT/bin:$PATH"
@@ -76,8 +79,8 @@ fi
 echo ""
 
 # 3. Code formatting check (EXACT CI command)
-log_info "Checking code formatting (gofmt -l .)..."
-UNFORMATTED=$(gofmt -l .)
+log_info "Checking code formatting (gofmt)..."
+UNFORMATTED=$(gofmt -l $(go list -f '{{.Dir}}' $GO_PACKAGES | sort -u))
 if [ -n "$UNFORMATTED" ]; then
     log_error "The following files need formatting:"
     echo "$UNFORMATTED"
@@ -89,9 +92,9 @@ else
 fi
 echo ""
 
-# 4. Go vet
+# 4. Go vet (core packages only; Wails needs embedded frontend + CGO)
 log_info "Running go vet..."
-if go vet ./... 2>&1; then
+if go vet $GO_CORE_PACKAGES 2>&1; then
     log_success "go vet passed"
 else
     log_error "go vet failed"
@@ -99,10 +102,14 @@ else
 fi
 echo ""
 
-# 5. Build all packages
-log_info "Building all packages..."
+# 5. Build application (requires embedded frontend)
+log_info "Building application..."
 BUILD_TMPDIR=$(mktemp -d)
-if go build -o "$BUILD_TMPDIR" ./... 2>&1; then
+if [ ! -d internal/ui/wails/frontend/dist ]; then
+    log_info "frontend dist missing — building via make frontend..."
+    make frontend
+fi
+if CGO_ENABLED=1 go build -tags production -o "$BUILD_TMPDIR/termizard" ./cmd/termizard 2>&1; then
     log_success "Build successful"
 else
     log_error "Build failed"
@@ -176,10 +183,10 @@ echo ""
 log_info "Running tests..."
 if command -v gcc &> /dev/null || command -v clang &> /dev/null; then
     log_info "C compiler found, enabling race detector..."
-    TEST_OUTPUT=$(go test -race ./... 2>&1 || true)
+    TEST_OUTPUT=$(go test -race $GO_CORE_PACKAGES 2>&1 || true)
 else
     log_info "No C compiler, running tests without race detector..."
-    TEST_OUTPUT=$(go test ./... 2>&1 || true)
+    TEST_OUTPUT=$(go test $GO_CORE_PACKAGES 2>&1 || true)
 fi
 
 if echo "$TEST_OUTPUT" | grep -q "FAIL"; then
@@ -196,13 +203,13 @@ echo ""
 
 # 8. Test coverage check
 log_info "Checking test coverage..."
-COVERAGE=$(go test -cover ./... 2>&1 | grep "coverage:" | tail -1 | awk '{print $3}' | sed 's/%//')
+COVERAGE=$(go test -count=1 -cover $GO_CORE_PACKAGES 2>&1 | grep "coverage:" | tail -1 | awk -F'coverage: ' '{print $2}' | awk '{print $1}' | sed 's/%//')
 if [ -n "$COVERAGE" ]; then
     echo "  overall coverage: ${COVERAGE}%"
-    if awk -v cov="$COVERAGE" 'BEGIN {exit !(cov >= 70.0)}'; then
-        log_success "Coverage meets requirement (>70%)"
+    if awk -v cov="$COVERAGE" 'BEGIN {exit !(cov >= 85.0)}'; then
+        log_success "Coverage meets requirement (>85%)"
     else
-        log_warning "Coverage below 70% (${COVERAGE}%) - acceptable for early versions"
+        log_warning "Coverage below 85% (${COVERAGE}%)"
         WARNINGS=$((WARNINGS + 1))
     fi
 else
@@ -223,7 +230,7 @@ echo ""
 # 10. golangci-lint (same as CI)
 log_info "Running golangci-lint..."
 if command -v golangci-lint &> /dev/null; then
-    LINT_OUTPUT=$(golangci-lint run --timeout=5m ./... 2>&1 || true)
+    LINT_OUTPUT=$(golangci-lint run --timeout=5m $GO_PACKAGES 2>&1 || true)
     if echo "$LINT_OUTPUT" | grep -qE "(^0 issues|no issues)"; then
         log_success "golangci-lint passed with 0 issues"
     elif [ -z "$LINT_OUTPUT" ]; then
@@ -238,6 +245,29 @@ if command -v golangci-lint &> /dev/null; then
 else
     log_warning "golangci-lint not installed"
     log_info "Install: https://golangci-lint.run/welcome/install/"
+    WARNINGS=$((WARNINGS + 1))
+fi
+echo ""
+
+# 10.5. Frontend lint (TypeScript + ESLint via Docker)
+log_info "Running frontend lint..."
+FRONTEND_DIR="internal/ui/wails/frontend"
+NODE_IMAGE="node:22-alpine"
+NODE_MODULES_VOLUME="termizard-node-modules"
+if command -v docker &> /dev/null; then
+    if docker run --rm \
+        -v "$NODE_MODULES_VOLUME":/app/node_modules \
+        -v "$(pwd)/$FRONTEND_DIR:/app" \
+        -w /app \
+        "$NODE_IMAGE" \
+        sh -c "npm ci --ignore-scripts && npm run lint" 2>&1; then
+        log_success "Frontend lint passed"
+    else
+        log_error "Frontend lint failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    log_warning "Docker not available — skipping frontend lint"
     WARNINGS=$((WARNINGS + 1))
 fi
 echo ""

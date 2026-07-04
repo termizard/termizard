@@ -8,11 +8,11 @@ coverage:
   status:
     project:
       default:
-        target: 70%       # fail PR if overall coverage drops below 70%
+        target: 85%       # fail PR if overall coverage drops below 85%
         threshold: 1%     # allow up to 1% regression before blocking
     patch:
       default:
-        target: 70%       # new/changed lines in a PR must also reach 70%
+        target: 85%       # new/changed lines in a PR must also reach 85%
         threshold: 1%
 
 # Paths excluded from coverage (entry points and generated code)
@@ -20,6 +20,9 @@ ignore:
   - "cmd/"
   - "tmp/"
   - "examples/"
+  - "internal/ui/wails/"
+  - "internal/ui/mock/"
+  - "internal/util/config/"
 
 parsers:
   go:

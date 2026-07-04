@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.26'
+  WAILS_VERSION: v3.0.0-alpha2.112
+
+jobs:
+  build-macos-arm64:
+    name: macOS arm64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: internal/ui/wails/frontend/package-lock.json
+
+      - name: Install build tools
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+          go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Build DMG installer
+        run: task darwin:package ARCH=arm64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termizard-macos-arm64
+          path: |
+            bin/termizard
+            bin/termizard-macos-arm64.dmg
+
+  build-macos-amd64:
+    name: macOS amd64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: internal/ui/wails/frontend/package-lock.json
+
+      - name: Install build tools
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+          go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Build DMG installer
+        run: task darwin:package ARCH=amd64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termizard-macos-amd64
+          path: |
+            bin/termizard
+            bin/termizard-macos-amd64.dmg
+
+  build-windows-amd64:
+    name: Windows amd64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: internal/ui/wails/frontend/package-lock.json
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+          go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Build NSIS installer (desktop + Start Menu shortcuts)
+        shell: bash
+        run: task windows:package ARCH=amd64 INSTALL_SCOPE=user
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termizard-windows-amd64
+          path: bin/termizard-amd64-installer.exe
+
+  build-linux-amd64:
+    name: Linux amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: internal/ui/wails/frontend/package-lock.json
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc pkg-config \
+            libgtk-4-dev libwebkitgtk-6.0-dev
+
+      - name: Install build tools
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
+          go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Build installers (menu + desktop shortcuts)
+        run: |
+          task linux:create:deb ARCH=amd64
+          task linux:create:appimage ARCH=amd64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termizard-linux-amd64
+          path: |
+            bin/*.deb
+            bin/*.AppImage
+
+  publish:
+    name: Publish release assets
+    needs:
+      - build-macos-arm64
+      - build-macos-amd64
+      - build-windows-amd64
+      - build-linux-amd64
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

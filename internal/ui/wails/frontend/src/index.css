@@ -1,0 +1,123 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --jb-bg-base: #1e1f22;
+  --jb-bg-mid: #2b2d30;
+  --jb-accent-purple: #3d3350;
+  --jb-accent-blue: #2a3d5c;
+  --jb-titlebar: #1e1f22;
+  --jb-title-text: rgba(188, 190, 196, 0.75);
+  --jb-border: rgba(255, 255, 255, 0.08);
+  --titlebar-side: 78px;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--jb-bg-base);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: var(--jb-bg-base);
+}
+
+/* JetBrains-style slow gradient shimmer behind the terminal */
+.app::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(
+    135deg,
+    var(--jb-bg-base) 0%,
+    var(--jb-bg-mid) 20%,
+    var(--jb-accent-purple) 45%,
+    var(--jb-accent-blue) 70%,
+    var(--jb-bg-base) 100%
+  );
+  background-size: 400% 400%;
+  animation: jb-shimmer 20s ease infinite;
+  pointer-events: none;
+}
+
+@keyframes jb-shimmer {
+  0%, 100% { background-position: 0% 50%; }
+  33%       { background-position: 100% 0%; }
+  66%       { background-position: 50% 100%; }
+}
+
+/* ── Title bar ─────────────────────────────────────────────────────────── */
+
+.titlebar {
+  flex-shrink: 0;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--jb-titlebar);
+  border-bottom: 1px solid var(--jb-border);
+  --wails-draggable: drag;
+  user-select: none;
+  position: relative;
+  z-index: 2;
+  padding: 0 16px;
+}
+
+/* macOS traffic lights occupy the left inset — balance with matching padding */
+.titlebar--mac {
+  padding-left: 78px;
+  padding-right: 16px;
+}
+
+.titlebar-title {
+  font-size: 12.5px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 500;
+  color: var(--jb-title-text);
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  line-height: 1;
+}
+
+/* ── Terminal ───────────────────────────────────────────────────────────── */
+
+.terminal-container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+.xterm {
+  width: 100%;
+  height: 100%;
+}
+
+.xterm .xterm-screen,
+.xterm .xterm-viewport,
+.xterm-helper-textarea {
+  background-color: transparent !important;
+}
+
+.xterm-viewport {
+  overflow-y: hidden !important;
+}
+
+/* Hide xterm's focus outline ring */
+.xterm:focus .xterm-screen {
+  outline: none;
+}
