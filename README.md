@@ -73,6 +73,7 @@ Artifacts land in `bin/`. Publishing to GitHub Releases is handled by [`.github/
 
 ```
 cmd/termizard/                 Application entry point
+frontend/                      React + xterm.js UI (Vite); embeds dist/ at build time
 internal/
   adapter/                     UI / PTY adapter interfaces
   app/                         Wires PTY, config, and UI
@@ -82,14 +83,14 @@ internal/
     terminal/                  Terminal grid & screen model
     vte/                       VT escape-sequence parser
   ui/
-    wails/                     Wails v3 backend + React/xterm.js frontend
+    wails/                     Wails v3 backend service
     mock/                      Test doubles
 assets/                        Static assets (logo.png)
 build/                         Packaging: Taskfiles, NSIS, nfpm, DMG script
 .github/workflows/             CI and release automation
 ```
 
-Generated locally and not committed: `bin/`, `.task/`, `internal/ui/wails/frontend/dist/`, generated icons under `build/`.
+Generated locally and not committed: `bin/`, `.task/`, `frontend/dist/`, generated icons under `build/`.
 
 ## Pre-release check
 

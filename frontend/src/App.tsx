@@ -34,7 +34,6 @@ export function App() {
     let fitAddon: FitAddon | null = null
     let disposed = false
     let termReady = false
-    let mdX = 0, mdY = 0
     let offPtyData: (() => void) | null = null
     const pending: string[] = []
 
@@ -137,20 +136,6 @@ export function App() {
           return false
         }
 
-        if (!isMac && ctrl && shift && !meta && !alt && k === 'V') {
-          navigator.clipboard.readText()
-            .then(text => { if (text) svc.SendInput(text).catch(() => {}) })
-            .catch(() => {})
-          return false
-        }
-
-        if (isMac && meta && !ctrl && !shift && !alt && k === 'v') {
-          navigator.clipboard.readText()
-            .then(text => { if (text) svc.SendInput(text).catch(() => {}) })
-            .catch(() => {})
-          return false
-        }
-
         if ((isMac  && meta && !ctrl && !shift && !alt && k === 'n') ||
             (!isMac && ctrl && shift && !meta  && !alt && k === 'N')) {
           svc.NewWindow().catch(() => {})
@@ -162,8 +147,6 @@ export function App() {
 
       window.addEventListener('paste', onPaste, true)
       container!.addEventListener('contextmenu', onContextMenu)
-      container!.addEventListener('mousedown', onMouseDown)
-      container!.addEventListener('click', onClick)
 
       term.focus()
     }
@@ -182,29 +165,6 @@ export function App() {
         .catch(() => {})
     }
 
-    function onMouseDown(e: MouseEvent) { mdX = e.clientX; mdY = e.clientY }
-
-    function onClick(e: MouseEvent) {
-      if (!term) return
-      if (Math.abs(e.clientX - mdX) > 4 || Math.abs(e.clientY - mdY) > 4) return
-      if (term.modes.mouseTrackingMode !== 'none') return
-
-      const rect  = container!.getBoundingClientRect()
-      const cellW = rect.width  / term.cols
-      const cellH = rect.height / term.rows
-      const clickCol = Math.floor((e.clientX - rect.left) / cellW)
-      const clickRow = Math.floor((e.clientY - rect.top)  / cellH)
-      const dRow = Math.max(-term.rows, Math.min(term.rows, clickRow - term.buffer.active.cursorY))
-      const dCol = Math.max(-term.cols, Math.min(term.cols, clickCol - term.buffer.active.cursorX))
-
-      let seq = ''
-      if (dRow > 0) seq += '\x1b[B'.repeat(dRow)
-      if (dRow < 0) seq += '\x1b[A'.repeat(-dRow)
-      if (dCol > 0) seq += '\x1b[C'.repeat(dCol)
-      if (dCol < 0) seq += '\x1b[D'.repeat(-dCol)
-      if (seq) svc.SendInput(seq).catch(() => {})
-    }
-
     init().catch(console.error)
 
     const onWindowResize = () => fitRef.current?.fit()
@@ -216,8 +176,6 @@ export function App() {
       window.removeEventListener('resize', onWindowResize)
       window.removeEventListener('paste', onPaste, true)
       container?.removeEventListener('contextmenu', onContextMenu)
-      container?.removeEventListener('mousedown', onMouseDown)
-      container?.removeEventListener('click', onClick)
       term?.dispose()
       termRef.current = null
       fitRef.current  = null

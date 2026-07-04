@@ -10,7 +10,6 @@ package wails
 
 import (
 	"context"
-	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -20,14 +19,12 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
+	"github.com/termizard/termizard/frontend"
 	"github.com/termizard/termizard/internal/adapter"
 	"github.com/termizard/termizard/internal/config"
 	"github.com/termizard/termizard/internal/core/pty"
 	"github.com/termizard/termizard/internal/util/logger"
 )
-
-//go:embed all:frontend/dist
-var assets embed.FS
 
 const defaultAppName = "termizard"
 
@@ -356,7 +353,7 @@ func (u *UI) Run() error {
 			application.NewService(u.svc),
 		},
 		Assets: application.AssetOptions{
-			Handler: application.BundledAssetFileServer(assets),
+			Handler: application.BundledAssetFileServer(frontend.Dist),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,

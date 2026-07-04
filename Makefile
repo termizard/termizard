@@ -1,4 +1,4 @@
-FRONTEND_DIR         := internal/ui/wails/frontend
+FRONTEND_DIR         := frontend
 BINARY               := termizard
 NODE_IMAGE           := node:22-alpine
 # Named volume keeps node_modules out of the host filesystem.
