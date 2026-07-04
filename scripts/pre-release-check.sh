@@ -13,6 +13,7 @@
 set -e  # Exit on first error
 
 GO_PACKAGES="./cmd/... ./internal/..."
+GO_CORE_PACKAGES="./internal/adapter/... ./internal/config/... ./internal/core/... ./internal/ui/mock/... ./internal/util/..."
 
 # Handle GOROOT for Windows with multiple Go versions
 if [[ -n "$GOROOT" ]]; then
@@ -91,9 +92,9 @@ else
 fi
 echo ""
 
-# 4. Go vet
+# 4. Go vet (core packages only; Wails needs embedded frontend + CGO)
 log_info "Running go vet..."
-if go vet $GO_PACKAGES 2>&1; then
+if go vet $GO_CORE_PACKAGES 2>&1; then
     log_success "go vet passed"
 else
     log_error "go vet failed"
@@ -182,10 +183,10 @@ echo ""
 log_info "Running tests..."
 if command -v gcc &> /dev/null || command -v clang &> /dev/null; then
     log_info "C compiler found, enabling race detector..."
-    TEST_OUTPUT=$(go test -race $GO_PACKAGES 2>&1 || true)
+    TEST_OUTPUT=$(go test -race $GO_CORE_PACKAGES 2>&1 || true)
 else
     log_info "No C compiler, running tests without race detector..."
-    TEST_OUTPUT=$(go test $GO_PACKAGES 2>&1 || true)
+    TEST_OUTPUT=$(go test $GO_CORE_PACKAGES 2>&1 || true)
 fi
 
 if echo "$TEST_OUTPUT" | grep -q "FAIL"; then
@@ -202,7 +203,7 @@ echo ""
 
 # 8. Test coverage check
 log_info "Checking test coverage..."
-COVERAGE=$(go test -count=1 -cover $GO_PACKAGES 2>&1 | grep "coverage:" | tail -1 | awk -F'coverage: ' '{print $2}' | awk '{print $1}' | sed 's/%//')
+COVERAGE=$(go test -count=1 -cover $GO_CORE_PACKAGES 2>&1 | grep "coverage:" | tail -1 | awk -F'coverage: ' '{print $2}' | awk '{print $1}' | sed 's/%//')
 if [ -n "$COVERAGE" ]; then
     echo "  overall coverage: ${COVERAGE}%"
     if awk -v cov="$COVERAGE" 'BEGIN {exit !(cov >= 70.0)}'; then

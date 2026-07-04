@@ -1,7 +1,7 @@
 name: CI
 
 # CI Strategy:
-# - Core library tests run on Linux, macOS, and Windows (CGO_ENABLED=0)
+# - Core library tests run on Linux, macOS, and Windows (CGO_ENABLED=0, no Wails)
 # - Application build requires embedded frontend dist + CGO on Unix (Wails v3)
 # - Go 1.26+ required (matches go.mod requirement)
 #
@@ -25,6 +25,8 @@ permissions:
 
 env:
   GO_PACKAGES: ./cmd/... ./internal/...
+  # Wails UI needs embedded frontend + CGO; covered by build/lint jobs.
+  GO_CORE_PACKAGES: ./internal/adapter/... ./internal/config/... ./internal/core/... ./internal/ui/mock/... ./internal/util/...
 
 jobs:
   build:
@@ -104,14 +106,14 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      run: go vet ${{ env.GO_PACKAGES }}
+      run: go vet ${{ env.GO_CORE_PACKAGES }}
 
     - name: Install race detector
       run: go install github.com/kolkov/racedetector/cmd/racedetector@latest
 
     - name: Run tests with race detector
       shell: bash
-      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }}
+      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_CORE_PACKAGES }}
 
     - name: Verify coverage file
       if: matrix.os == 'ubuntu-latest'
@@ -121,7 +123,7 @@ jobs:
           echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
         else
           echo "coverage.txt not found, generating separately..."
-          go test -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }} || true
+          go test -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_CORE_PACKAGES }} || true
         fi
 
     - name: Upload coverage to Codecov
