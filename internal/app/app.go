@@ -57,10 +57,11 @@ func New(cfg *config.Config) (*App, error) {
 		if rows < 1 {
 			rows = 24
 		}
+		c, r := pty.ClampSize(cols, rows)
 		np, err := pty.Open(pty.Config{
 			Command: cfg.ShellCommand(),
-			Cols:    uint16(cols), //nolint:gosec
-			Rows:    uint16(rows), //nolint:gosec
+			Cols:    c,
+			Rows:    r,
 		})
 		if err != nil {
 			return err

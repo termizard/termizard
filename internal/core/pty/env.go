@@ -37,6 +37,23 @@ func PrepareShellEnv(base []string) []string {
 	return envSlice(m)
 }
 
+// ClampSize converts terminal dimensions to uint16 with sane bounds.
+func ClampSize(cols, rows int) (uint16, uint16) {
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	if cols > 65535 {
+		cols = 65535
+	}
+	if rows > 65535 {
+		rows = 65535
+	}
+	return uint16(cols), uint16(rows)
+}
+
 func defaultLANG() string {
 	for _, key := range []string{"LANG", "LC_CTYPE", "LC_ALL"} {
 		if v := os.Getenv(key); v != "" {

@@ -23,15 +23,15 @@ type Config struct {
 }
 
 type WindowConfig struct {
-	Title         string
-	Width         int
-	Height        int
-	MinWidth      int
-	MinHeight     int
-	Opacity       float64
-	PaddingX      int
-	PaddingY      int
-	ShowTitleBar  bool `toml:"show_title_bar"`
+	Title        string
+	Width        int
+	Height       int
+	MinWidth     int
+	MinHeight    int
+	Opacity      float64
+	PaddingX     int
+	PaddingY     int
+	ShowTitleBar bool `toml:"show_title_bar"`
 }
 
 type TerminalConfig struct {
@@ -74,9 +74,9 @@ type ANSIColors struct {
 }
 
 type ShellConfig struct {
-	Program     string
-	Args        []string
-	NoOhMyZsh   bool // skip .zshrc (oh-my-zsh) — bare zsh for testing
+	Program   string
+	Args      []string
+	NoOhMyZsh bool // skip .zshrc (oh-my-zsh) — bare zsh for testing
 }
 
 type ScrollbackConfig struct {

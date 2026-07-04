@@ -226,7 +226,12 @@ export function App() {
 
   return (
     <div className="app">
-      {showTitleBar && <TitleBar title={title} />}
+      {showTitleBar && (
+        <TitleBar
+          title={title}
+          onToggleMaximize={() => svc.ToggleMaximize().catch(() => {})}
+        />
+      )}
       <div className="terminal-container" ref={containerRef} />
     </div>
   )

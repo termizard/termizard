@@ -12,6 +12,8 @@
 
 set -e  # Exit on first error
 
+GO_PACKAGES="./cmd/... ./internal/..."
+
 # Handle GOROOT for Windows with multiple Go versions
 if [[ -n "$GOROOT" ]]; then
     export PATH="$GOROOT/bin:$PATH"
@@ -76,8 +78,8 @@ fi
 echo ""
 
 # 3. Code formatting check (EXACT CI command)
-log_info "Checking code formatting (gofmt -l .)..."
-UNFORMATTED=$(gofmt -l .)
+log_info "Checking code formatting (gofmt)..."
+UNFORMATTED=$(gofmt -l $(go list -f '{{.Dir}}' $GO_PACKAGES | sort -u))
 if [ -n "$UNFORMATTED" ]; then
     log_error "The following files need formatting:"
     echo "$UNFORMATTED"
@@ -91,7 +93,7 @@ echo ""
 
 # 4. Go vet
 log_info "Running go vet..."
-if go vet ./... 2>&1; then
+if go vet $GO_PACKAGES 2>&1; then
     log_success "go vet passed"
 else
     log_error "go vet failed"
@@ -99,10 +101,14 @@ else
 fi
 echo ""
 
-# 5. Build all packages
-log_info "Building all packages..."
+# 5. Build application (requires embedded frontend)
+log_info "Building application..."
 BUILD_TMPDIR=$(mktemp -d)
-if go build -o "$BUILD_TMPDIR" ./... 2>&1; then
+if [ ! -d internal/ui/wails/frontend/dist ]; then
+    log_info "frontend dist missing — building via make frontend..."
+    make frontend
+fi
+if CGO_ENABLED=1 go build -tags production -o "$BUILD_TMPDIR/termizard" ./cmd/termizard 2>&1; then
     log_success "Build successful"
 else
     log_error "Build failed"
@@ -176,10 +182,10 @@ echo ""
 log_info "Running tests..."
 if command -v gcc &> /dev/null || command -v clang &> /dev/null; then
     log_info "C compiler found, enabling race detector..."
-    TEST_OUTPUT=$(go test -race ./... 2>&1 || true)
+    TEST_OUTPUT=$(go test -race $GO_PACKAGES 2>&1 || true)
 else
     log_info "No C compiler, running tests without race detector..."
-    TEST_OUTPUT=$(go test ./... 2>&1 || true)
+    TEST_OUTPUT=$(go test $GO_PACKAGES 2>&1 || true)
 fi
 
 if echo "$TEST_OUTPUT" | grep -q "FAIL"; then
@@ -196,7 +202,7 @@ echo ""
 
 # 8. Test coverage check
 log_info "Checking test coverage..."
-COVERAGE=$(go test -count=1 -cover ./... 2>&1 | grep "coverage:" | tail -1 | awk -F'coverage: ' '{print $2}' | awk '{print $1}' | sed 's/%//')
+COVERAGE=$(go test -count=1 -cover $GO_PACKAGES 2>&1 | grep "coverage:" | tail -1 | awk -F'coverage: ' '{print $2}' | awk '{print $1}' | sed 's/%//')
 if [ -n "$COVERAGE" ]; then
     echo "  overall coverage: ${COVERAGE}%"
     if awk -v cov="$COVERAGE" 'BEGIN {exit !(cov >= 70.0)}'; then
@@ -223,7 +229,7 @@ echo ""
 # 10. golangci-lint (same as CI)
 log_info "Running golangci-lint..."
 if command -v golangci-lint &> /dev/null; then
-    LINT_OUTPUT=$(golangci-lint run --timeout=5m ./... 2>&1 || true)
+    LINT_OUTPUT=$(golangci-lint run --timeout=5m $GO_PACKAGES 2>&1 || true)
     if echo "$LINT_OUTPUT" | grep -qE "(^0 issues|no issues)"; then
         log_success "golangci-lint passed with 0 issues"
     elif [ -z "$LINT_OUTPUT" ]; then

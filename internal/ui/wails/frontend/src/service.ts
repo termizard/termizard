@@ -48,6 +48,10 @@ export function SetTitle(title: string): CancellablePromise<void> {
   return Call.ByName(`${pkg}.SetTitle`, title)
 }
 
+export function ToggleMaximize(): CancellablePromise<void> {
+  return Call.ByName(`${pkg}.ToggleMaximize`)
+}
+
 export function SendInput(data: string): CancellablePromise<void> {
   return Call.ByName(`${pkg}.SendInput`, data)
 }

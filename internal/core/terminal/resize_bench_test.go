@@ -19,7 +19,7 @@ func BenchmarkResizeDrag(b *testing.B) {
 	term := terminal.New(120, 40, 10000, true)
 	var sb strings.Builder
 	for i := 0; i < 40; i++ {
-		sb.WriteString(fmt.Sprintf("drwx------@  user staff %6d Jun 30 23:00 long-filename-entry-%02d\r\n", i*100, i))
+		fmt.Fprintf(&sb, "drwx------@  user staff %6d Jun 30 23:00 long-filename-entry-%02d\r\n", i*100, i)
 	}
 	data := sb.String()
 	feedBytes(term, data)
@@ -40,7 +40,7 @@ func TestResizeMemoryGrowth(t *testing.T) {
 	term := terminal.New(120, 40, 10000, true)
 	var sb strings.Builder
 	for i := 0; i < 40; i++ {
-		sb.WriteString(fmt.Sprintf("drwx------@  user staff %6d Jun 30 23:00 long-filename-entry-%02d\r\n", i*100, i))
+		fmt.Fprintf(&sb, "drwx------@  user staff %6d Jun 30 23:00 long-filename-entry-%02d\r\n", i*100, i)
 	}
 	feedBytes(term, sb.String())
 

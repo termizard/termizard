@@ -1,18 +1,14 @@
 name: CI
 
 # CI Strategy:
-# - Tests run on Linux, macOS, and Windows (cross-platform terminal library)
+# - Core library tests run on Linux, macOS, and Windows (CGO_ENABLED=0)
+# - Application build requires embedded frontend dist + CGO on Unix (Wails v3)
 # - Go 1.26+ required (matches go.mod requirement)
-# - CGO_ENABLED=0: Pure Go, no C compiler required
-# - Race detection via github.com/kolkov/racedetector (no CGO needed)
 #
 # Branch Strategy (GitHub Flow):
 # - main branch: Production-ready code
 # - Feature branches: Tested via pull_request trigger
 # - Pull requests: Must pass all checks before merge
-
-env:
-  CGO_ENABLED: "0"
 
 on:
   push:
@@ -27,8 +23,10 @@ permissions:
   contents: read
   id-token: write  # Required for Codecov OIDC token
 
+env:
+  GO_PACKAGES: ./cmd/... ./internal/...
+
 jobs:
-  # Build verification - Cross-platform
   build:
     name: Build - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -47,19 +45,45 @@ jobs:
         go-version: ${{ matrix.go-version }}
         cache: true
 
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: internal/ui/wails/frontend/package-lock.json
+
+    - name: Build frontend
+      run: |
+        cd internal/ui/wails/frontend
+        npm ci
+        npm run build
+
+    - name: Install Linux GUI build dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
+
     - name: Download dependencies
       run: go mod download
 
     - name: Verify dependencies
       run: go mod verify
 
-    - name: Build all packages
-      run: go build ./...
+    - name: Build application
+      shell: bash
+      run: |
+        OUT=termizard
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then OUT=termizard.exe; fi
+        go build -tags production -o "$OUT" ./cmd/termizard
+      env:
+        CGO_ENABLED: ${{ matrix.os == 'windows-latest' && '0' || '1' }}
 
-  # Unit tests - Cross-platform
   test:
     name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: "0"
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -80,14 +104,14 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      run: go vet ./...
+      run: go vet ${{ env.GO_PACKAGES }}
 
     - name: Install race detector
       run: go install github.com/kolkov/racedetector/cmd/racedetector@latest
 
     - name: Run tests with race detector
       shell: bash
-      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ./...
+      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }}
 
     - name: Verify coverage file
       if: matrix.os == 'ubuntu-latest'
@@ -97,7 +121,7 @@ jobs:
           echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
         else
           echo "coverage.txt not found, generating separately..."
-          go test -coverprofile=coverage.txt -covermode=atomic ./... || true
+          go test -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }} || true
         fi
 
     - name: Upload coverage to Codecov
@@ -110,7 +134,6 @@ jobs:
         name: codecov-termizard
         fail_ci_if_error: true
 
-  # Linting
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -125,13 +148,32 @@ jobs:
         go-version: '1.26'
         cache: true
 
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: internal/ui/wails/frontend/package-lock.json
+
+    - name: Build frontend
+      run: |
+        cd internal/ui/wails/frontend
+        npm ci
+        npm run build
+
+    - name: Install Linux GUI build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
+
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v8
       with:
         version: latest
-        args: --timeout=5m
+        args: --timeout=5m ./cmd/... ./internal/...
+      env:
+        CGO_ENABLED: "1"
 
-  # Code formatting check
   formatting:
     name: Formatting
     runs-on: ubuntu-latest
@@ -148,16 +190,16 @@ jobs:
 
     - name: Check formatting
       run: |
-        if [ -n "$(gofmt -l .)" ]; then
+        UNFORMATTED=$(gofmt -l $(go list -f '{{.Dir}}' ./cmd/... ./internal/... | sort -u))
+        if [ -n "$UNFORMATTED" ]; then
           echo "ERROR: The following files are not formatted:"
-          gofmt -l .
+          echo "$UNFORMATTED"
           echo ""
-          echo "Run 'go fmt ./...' to fix formatting issues."
+          echo "Run 'gofmt -w' on the files above."
           exit 1
         fi
         echo "All files are properly formatted"
 
-  # Dependency freshness check (non-blocking)
   deps:
     name: Dependencies
     runs-on: ubuntu-latest

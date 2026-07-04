@@ -5,7 +5,7 @@ const (
 	modShift = "Shift"
 )
 
-// Defaults returns the out-of-the-box configuration: JetBrains Darcula-inspired
+// Defaults returns the out-of-the-box configuration: JetBrains IDE dark theme,
 // colors, blinking block cursor, and JetBrains Mono as the preferred font.
 func Defaults() *Config {
 	return &Config{

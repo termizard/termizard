@@ -458,12 +458,6 @@ func groupVisualRows(visualRows [][]Cell, rowWrapped []bool) [][]Cell {
 	return lines
 }
 
-// line returns a slice of cells for the given row (used by scrollback).
-// The slice spans the full backing stride, which may be wider than Cols().
-func (g *Grid) line(row int) []Cell {
-	return g.cells[row*g.stride : (row+1)*g.stride]
-}
-
 // lineForScrollback returns a cols-width copy of the row for scrollback storage.
 func (g *Grid) lineForScrollback(row int) []Cell {
 	line := make([]Cell, g.cols)

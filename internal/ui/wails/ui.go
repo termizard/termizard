@@ -21,13 +21,15 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/termizard/termizard/internal/adapter"
-	"github.com/termizard/termizard/internal/core/pty"
 	"github.com/termizard/termizard/internal/config"
+	"github.com/termizard/termizard/internal/core/pty"
 	"github.com/termizard/termizard/internal/util/logger"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+const defaultAppName = "termizard"
 
 // XTermTheme holds color values forwarded to xterm.js at startup.
 type XTermTheme struct {
@@ -177,6 +179,13 @@ func (s *TerminalService) SetTitle(ctx context.Context, title string) {
 	}
 }
 
+// ToggleMaximize toggles the calling window between maximized and normal size.
+func (s *TerminalService) ToggleMaximize(ctx context.Context) {
+	if w, ok := ctx.Value(application.WindowKey).(application.Window); ok {
+		w.ToggleMaximise()
+	}
+}
+
 // SendInput routes keyboard input from the calling window's xterm.js to its PTY.
 func (s *TerminalService) SendInput(ctx context.Context, data string) {
 	if sess := s.sessionFromCtx(ctx); sess != nil {
@@ -187,10 +196,8 @@ func (s *TerminalService) SendInput(ctx context.Context, data string) {
 // Resize notifies the PTY of the calling window's new terminal dimensions.
 func (s *TerminalService) Resize(ctx context.Context, cols, rows int) {
 	if sess := s.sessionFromCtx(ctx); sess != nil {
-		sess.resize(adapter.ResizeEvent{
-			Cols: uint16(cols), //nolint:gosec
-			Rows: uint16(rows), //nolint:gosec
-		})
+		c, r := pty.ClampSize(cols, rows)
+		sess.resize(adapter.ResizeEvent{Cols: c, Rows: r})
 	}
 }
 
@@ -232,10 +239,11 @@ func (s *TerminalService) attachPTY(w application.Window, sess *winSession, cols
 	if rows < 1 {
 		rows = 24
 	}
+	c, r := pty.ClampSize(cols, rows)
 	p, err := pty.Open(pty.Config{
 		Command: s.cfg.ShellCommand(),
-		Cols:    uint16(cols), //nolint:gosec
-		Rows:    uint16(rows), //nolint:gosec
+		Cols:    c,
+		Rows:    r,
 	})
 	if err != nil {
 		logger.Get().Error("PTY open failed", "err", err)
@@ -343,7 +351,7 @@ func (u *UI) Close() error {
 // Run starts the Wails v3 event loop. Blocks until all windows close.
 func (u *UI) Run() error {
 	app := application.New(application.Options{
-		Name: "termizard",
+		Name: defaultAppName,
 		Services: []application.Service{
 			application.NewService(u.svc),
 		},
@@ -388,7 +396,7 @@ func (u *UI) Run() error {
 func windowOptions(cfg *config.Config) application.WebviewWindowOptions {
 	title := cfg.Window.Title
 	if title == "" {
-		title = "termizard"
+		title = defaultAppName
 	}
 	w := cfg.Window.Width
 	if w <= 0 {
@@ -432,7 +440,7 @@ func initialTitle() string {
 	if _, err := os.UserHomeDir(); err == nil {
 		return "~"
 	}
-	return "termizard"
+	return defaultAppName
 }
 
 func buildXTermConfig(cfg *config.Config) XTermConfig {
