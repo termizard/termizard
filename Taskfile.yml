@@ -4,7 +4,7 @@ vars:
   APP_NAME: "termizard"
   BIN_DIR: "bin"
   MAIN_PACKAGE: "./cmd/termizard"
-  FRONTEND_DIR: "internal/ui/wails/frontend"
+  FRONTEND_DIR: "frontend"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
   # Target OS for build/package/run. Defaults to the host OS, and is overridden

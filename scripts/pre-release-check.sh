@@ -105,7 +105,7 @@ echo ""
 # 5. Build application (requires embedded frontend)
 log_info "Building application..."
 BUILD_TMPDIR=$(mktemp -d)
-if [ ! -d internal/ui/wails/frontend/dist ]; then
+if [ ! -d frontend/dist ]; then
     log_info "frontend dist missing — building via make frontend..."
     make frontend
 fi
@@ -251,7 +251,7 @@ echo ""
 
 # 10.5. Frontend lint (TypeScript + ESLint via Docker)
 log_info "Running frontend lint..."
-FRONTEND_DIR="internal/ui/wails/frontend"
+FRONTEND_DIR="frontend"
 NODE_IMAGE="node:22-alpine"
 NODE_MODULES_VOLUME="termizard-node-modules"
 if command -v docker &> /dev/null; then
