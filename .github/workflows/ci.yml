@@ -84,8 +84,6 @@ jobs:
   test:
     name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    env:
-      CGO_ENABLED: "0"
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -107,15 +105,18 @@ jobs:
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
       run: go vet ${{ env.GO_CORE_PACKAGES }}
+      env:
+        CGO_ENABLED: "0"
 
     - name: Run tests with race detector
       shell: bash
       run: |
         FLAGS="-parallel 1 -coverprofile=coverage.txt -covermode=atomic"
+        PKGS="${{ env.GO_CORE_PACKAGES }}"
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          go test $FLAGS ${{ env.GO_CORE_PACKAGES }}
+          CGO_ENABLED=0 go test $FLAGS $PKGS
         else
-          go test -race $FLAGS ${{ env.GO_CORE_PACKAGES }}
+          CGO_ENABLED=1 go test -race $FLAGS $PKGS
         fi
 
     - name: Verify coverage file
@@ -126,7 +127,7 @@ jobs:
           echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
         else
           echo "coverage.txt not found, generating separately..."
-          go test -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_CORE_PACKAGES }} || true
+          CGO_ENABLED=0 go test -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_CORE_PACKAGES }} || true
         fi
 
     - name: Upload coverage to Codecov
