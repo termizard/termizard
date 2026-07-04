@@ -90,9 +90,9 @@ func (s *screen) restoreCursor() {
 // Content is reflowed at the new column count: logical lines (runs of
 // soft-wrapped rows) are re-broken so expanding the terminal merges orphaned
 // continuation rows, and shrinking re-wraps content that no longer fits.
-func (s *screen) resize(cols, rows int, savedLines [][]Cell, gridContinues bool) (*screen, [][]Cell, [][]Cell, bool) {
-	newGrid, newCurRow, newCurCol, saved, sbLines, continues := s.grid.resize(
-		cols, rows, s.cursor.row, s.cursor.col, savedLines, gridContinues,
+func (s *screen) resize(cols, rows int, reflow bool, savedLines [][]Cell, gridContinues bool) (*screen, [][]Cell, bool) {
+	newGrid, newCurRow, newCurCol, saved, continues := s.grid.resize(
+		cols, rows, reflow, s.cursor.row, s.cursor.col, savedLines, gridContinues,
 	)
 	ns := &screen{
 		grid:      newGrid,
@@ -107,5 +107,5 @@ func (s *screen) resize(cols, rows int, savedLines [][]Cell, gridContinues bool)
 	ns.cursor.row = newCurRow
 	ns.cursor.col = newCurCol
 	ns.pendingWrap = false
-	return ns, saved, sbLines, continues
+	return ns, saved, continues
 }

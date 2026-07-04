@@ -1,5 +1,5 @@
-// Package mock_frontend provides a headless Frontend implementation for tests
-// and CI environments where no real window or GPU is available.
+// Package mock provides a headless UI implementation for tests and CI
+// environments where no real window or display is available.
 package mock
 
 import (
@@ -8,13 +8,13 @@ import (
 	"github.com/termizard/termizard/internal/adapter"
 )
 
-// Mock is a no-op frontend that records calls and lets tests inject
-// synthetic input events.
+// Mock is a no-op UI that records calls and lets tests inject synthetic events.
 type Mock struct {
 	mu       sync.Mutex
 	keyFn    func(adapter.KeyEvent)
 	resizeFn func(adapter.ResizeEvent)
 	done     chan struct{}
+	Written  [][]byte // accumulated Write calls, for test assertions
 }
 
 // New returns a Mock ready for use in tests.
@@ -22,7 +22,7 @@ func New() *Mock {
 	return &Mock{done: make(chan struct{})}
 }
 
-// Run blocks until Close is called. Safe to call from any goroutine.
+// Run blocks until Close is called.
 func (m *Mock) Run() error {
 	<-m.done
 	return nil
@@ -54,6 +54,19 @@ func (m *Mock) OnResize(fn func(adapter.ResizeEvent)) {
 	m.mu.Unlock()
 }
 
+// RequestRedraw is a no-op.
+func (m *Mock) RequestRedraw() {}
+
+// Write records the data and returns immediately.
+func (m *Mock) Write(data []byte) (int, error) {
+	buf := make([]byte, len(data))
+	copy(buf, data)
+	m.mu.Lock()
+	m.Written = append(m.Written, buf)
+	m.mu.Unlock()
+	return len(data), nil
+}
+
 // SimulateKey injects a synthetic key event, as if the user typed data.
 func (m *Mock) SimulateKey(data []byte) {
 	m.mu.Lock()
@@ -74,5 +87,4 @@ func (m *Mock) SimulateResize(cols, rows uint16) {
 	}
 }
 
-// Ensure Mock satisfies the Frontend interface at compile time.
 var _ adapter.UI = (*Mock)(nil)

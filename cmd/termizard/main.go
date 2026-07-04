@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/termizard/termizard/internal/app"
-	"github.com/termizard/termizard/internal/util/config"
+	"github.com/termizard/termizard/internal/config"
 	"github.com/termizard/termizard/internal/util/logger"
 )
 
@@ -26,6 +26,11 @@ func main() {
 				),
 			),
 		)
+	}
+
+	if err := config.EnsureDefaultFile(*cfgPath); err != nil {
+		fmt.Fprintf(os.Stderr, "termizard: config: %v\n", err)
+		os.Exit(1)
 	}
 
 	cfg, err := config.Load(*cfgPath)

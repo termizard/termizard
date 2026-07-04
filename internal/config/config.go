@@ -1,6 +1,8 @@
+// Package config loads and holds user-configurable terminal settings.
 package config
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -21,19 +23,21 @@ type Config struct {
 }
 
 type WindowConfig struct {
-	Title     string
-	Width     int
-	Height    int
-	MinWidth  int
-	MinHeight int
-	Opacity   float64
-	PaddingX  int // horizontal inset between window edge and first cell column
-	PaddingY  int // vertical inset between window edge and first cell row
+	Title         string
+	Width         int
+	Height        int
+	MinWidth      int
+	MinHeight     int
+	Opacity       float64
+	PaddingX      int
+	PaddingY      int
+	ShowTitleBar  bool `toml:"show_title_bar"`
 }
 
 type TerminalConfig struct {
-	InitialCols int
-	InitialRows int
+	InitialCols    int
+	InitialRows    int
+	ReflowOnResize bool
 }
 
 type FontConfig struct {
@@ -70,8 +74,9 @@ type ANSIColors struct {
 }
 
 type ShellConfig struct {
-	Program string
-	Args    []string
+	Program     string
+	Args        []string
+	NoOhMyZsh   bool // skip .zshrc (oh-my-zsh) — bare zsh for testing
 }
 
 type ScrollbackConfig struct {
@@ -87,13 +92,27 @@ type CursorConfig struct {
 type Keybinding struct {
 	Key    string
 	Mods   []string
-	Action string // "Paste" | "Copy" | "ScrollUp" | "ScrollDown"
+	Action string
 }
 
-const (
-	modCtrl  = "Ctrl"
-	modShift = "Shift"
-)
+// EnsureDefaultFile writes Defaults() to path when the file does not exist yet.
+func EnsureDefaultFile(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec
+		return err
+	}
+	var buf bytes.Buffer
+	buf.WriteString("# termizard default configuration\n")
+	buf.WriteString("# https://github.com/termizard/termizard\n\n")
+	if err := toml.NewEncoder(&buf).Encode(Defaults()); err != nil {
+		return err
+	}
+	return os.WriteFile(path, buf.Bytes(), 0o644) //nolint:gosec
+}
 
 // Load reads the config file at path and merges it over Defaults().
 // A missing file is not an error — defaults are returned.
@@ -120,60 +139,4 @@ func DefaultPath() string {
 		base = filepath.Join(home, ".config")
 	}
 	return filepath.Join(base, "termizard", "config.toml")
-}
-
-// Defaults returns a Config with sensible out-of-the-box values.
-func Defaults() *Config {
-	return &Config{
-		Window: WindowConfig{
-			Title:     "termizard",
-			Width:     1200,
-			Height:    800,
-			MinWidth:  400,
-			MinHeight: 240,
-			Opacity:   1.0,
-			PaddingX:  6,
-			PaddingY:  6,
-		},
-		Terminal: TerminalConfig{
-			InitialCols: 80,
-			InitialRows: 24,
-		},
-		Font: FontConfig{
-			Size: 14.0,
-		},
-		Colors: ColorConfig{
-			Background: "#1a1a2e",
-			Foreground: "#e0e0e0",
-			Cursor:     "#f38ba8",
-			Selection:  "#44475a",
-			ANSI: ANSIColors{
-				Black:         "#000000",
-				Red:           "#ff5555",
-				Green:         "#50fa7b",
-				Yellow:        "#f1fa8c",
-				Blue:          "#bd93f9",
-				Magenta:       "#ff79c6",
-				Cyan:          "#8be9fd",
-				White:         "#bfbfbf",
-				BrightBlack:   "#4d4d4d",
-				BrightRed:     "#ff6e67",
-				BrightGreen:   "#5af78e",
-				BrightYellow:  "#f4f99d",
-				BrightBlue:    "#caa9fa",
-				BrightMagenta: "#ff92d0",
-				BrightCyan:    "#9aedfe",
-				BrightWhite:   "#e6e6e6",
-			},
-		},
-		Shell:      ShellConfig{},
-		Scrollback: ScrollbackConfig{Lines: 10000},
-		Cursor:     CursorConfig{Shape: "block"},
-		Keybindings: []Keybinding{
-			{Key: "v", Mods: []string{modCtrl, modShift}, Action: "Paste"},
-			{Key: "c", Mods: []string{modCtrl, modShift}, Action: "Copy"},
-			{Key: "Up", Mods: []string{modCtrl, modShift}, Action: "ScrollUp"},
-			{Key: "Down", Mods: []string{modCtrl, modShift}, Action: "ScrollDown"},
-		},
-	}
 }

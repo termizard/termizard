@@ -1,6 +1,7 @@
 package terminal_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 func newTerm(cols, rows int) *terminal.Terminal {
-	return terminal.New(cols, rows, 1000)
+	return terminal.New(cols, rows, 1000, true)
 }
 
 // feed parses raw bytes through the VTE state machine into t.
@@ -577,7 +578,71 @@ func TestSoftWrapExpandRestoresAfterOverflowShrink(t *testing.T) {
 	}
 }
 
-// TestSoftWrapRoundTrip verifies a shrink→expand cycle fully restores the
+// TestVerticalShrinkExpandRoundTrip verifies that shrinking the row count
+// preserves content in reflowSavedLines and a subsequent expand restores it.
+func TestVerticalShrinkExpandRoundTrip(t *testing.T) {
+	term := newTerm(80, 24)
+	for i := 0; i < 20; i++ {
+		feed(t, term, fmt.Sprintf("line%02d\r\n", i))
+	}
+
+	term.Resize(80, 10)
+	if c := cellAt(t, term, 0, 0); c.Char != 'l' {
+		t.Fatalf("after shrink: bottom lines should remain visible, row0 got %q", c.Char)
+	}
+
+	term.Resize(80, 24)
+	for row, want := range map[int]string{0: "line00", 10: "line10", 19: "line19"} {
+		got := string(cellAt(t, term, row, 0).Char)
+		for col := 1; col < len(want); col++ {
+			got += string(cellAt(t, term, row, col).Char)
+		}
+		if got != want {
+			t.Fatalf("after expand row %d: want %q got %q", row, want, got)
+		}
+	}
+}
+
+// TestVerticalResizeDoesNotGrowScrollback verifies reflow resize does not push
+// lines into scrollback on every intermediate height change during a drag.
+func TestVerticalResizeDoesNotGrowScrollback(t *testing.T) {
+	term := newTerm(80, 24)
+	for i := 0; i < 20; i++ {
+		feed(t, term, fmt.Sprintf("line%02d\r\n", i))
+	}
+	before := term.ScrollbackLen()
+	for h := 24; h >= 10; h-- {
+		term.Resize(80, h)
+	}
+	for h := 10; h <= 24; h++ {
+		term.Resize(80, h)
+	}
+	if got := term.ScrollbackLen(); got != before {
+		t.Fatalf("scrollback grew from %d to %d during vertical resize reflow", before, got)
+	}
+}
+
+// TestVerticalShrinkExpandCursorAtTop verifies content is preserved even when
+// the cursor sits on the first line while many lines are below it.
+func TestVerticalShrinkExpandCursorAtTop(t *testing.T) {
+	term := newTerm(80, 24)
+	feed(t, term, "\x1b[1;1H") // cursor row 0
+	for i := 0; i < 20; i++ {
+		feed(t, term, fmt.Sprintf("line%02d\r\n", i))
+	}
+	feed(t, term, "\x1b[1;1H")
+
+	term.Resize(80, 10)
+	term.Resize(80, 24)
+
+	if c := cellAt(t, term, 0, 0); c.Char != 'l' {
+		t.Fatalf("after round-trip row0 want line00, got %q", c.Char)
+	}
+	if c := cellAt(t, term, 19, 0); c.Char != 'l' {
+		t.Fatalf("after round-trip row19 want line19, got %q", c.Char)
+	}
+}
+
 // original row layout from reflowed content.
 func TestSoftWrapRoundTrip(t *testing.T) {
 	term := newTerm(80, 10)

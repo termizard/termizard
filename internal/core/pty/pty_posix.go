@@ -32,10 +32,7 @@ func Open(cfg Config) (PTY, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pty: resolve dir: %w", err)
 	}
-	env := cfg.Env
-	if env == nil {
-		env = os.Environ()
-	}
+	env := PrepareShellEnv(cfg.Env)
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = env

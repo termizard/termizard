@@ -242,6 +242,29 @@ else
 fi
 echo ""
 
+# 10.5. Frontend lint (TypeScript + ESLint via Docker)
+log_info "Running frontend lint..."
+FRONTEND_DIR="internal/ui/wails/frontend"
+NODE_IMAGE="node:22-alpine"
+NODE_MODULES_VOLUME="termizard-node-modules"
+if command -v docker &> /dev/null; then
+    if docker run --rm \
+        -v "$NODE_MODULES_VOLUME":/app/node_modules \
+        -v "$(pwd)/$FRONTEND_DIR:/app" \
+        -w /app \
+        "$NODE_IMAGE" \
+        sh -c "npm ci --ignore-scripts && npm run lint" 2>&1; then
+        log_success "Frontend lint passed"
+    else
+        log_error "Frontend lint failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    log_warning "Docker not available — skipping frontend lint"
+    WARNINGS=$((WARNINGS + 1))
+fi
+echo ""
+
 # 11. Check for TODO/FIXME comments
 log_info "Checking for TODO/FIXME comments..."
 TODO_COUNT=$(grep -r "TODO\|FIXME" --include="*.go" --exclude-dir=vendor . 2>/dev/null | wc -l)

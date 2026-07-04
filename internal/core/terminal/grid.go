@@ -19,6 +19,10 @@ type Grid struct {
 	wrapped []bool // wrapped[r] = true: row r ends with an auto-wrap (soft wrap)
 }
 
+// maxReflowSavedCells caps memory retained in reflowSavedLines across resize
+// cycles. Roughly 500k cells ≈ 10 MB of Cell structs.
+const maxReflowSavedCells = 500_000
+
 func newGrid(cols, rows int) *Grid {
 	g := &Grid{
 		cells:   make([]Cell, cols*rows),
@@ -129,25 +133,68 @@ func (g *Grid) scrollDown(top, bot, n int) {
 	}
 }
 
-// resize returns a new grid reflowed at the given display dimensions.
-//
-// Logical lines (runs of soft-wrapped visual rows followed by a non-wrapped
-// row) are collected at the current g.cols width, trailing blank cells are
-// trimmed, then re-broken at newCols. This means:
-//   - Expanding cols merges rows that no longer need to wrap.
-//   - Shrinking cols re-wraps content that no longer fits.
-//
-// When the reflowed content is taller than newRows, the oldest visual rows at the
-// top are kept in savedLines (returned for the next resize) and optionally as
-// scrollback lines so expanding the terminal width can restore them.
-//
-// savedLines are prepended as separate logical lines before reflow. gridContinues
-// signals that the first grid logical line continues the last saved line.
-// cursorRow/cursorCol indicate where the cursor is in the current grid; the
-// function returns the cursor's position in the new grid.
-func (g *Grid) resize(newCols, newRows, cursorRow, cursorCol int, savedLines [][]Cell, gridContinues bool) (*Grid, int, int, [][]Cell, [][]Cell, bool) {
+// resize returns a new grid at the given display dimensions.
+// When reflow is false, existing cells are copied without re-breaking lines.
+func (g *Grid) resize(newCols, newRows int, reflow bool, cursorRow, cursorCol int, savedLines [][]Cell, gridContinues bool) (*Grid, int, int, [][]Cell, bool) {
+	if !reflow {
+		return g.resizeNoReflow(newCols, newRows, cursorRow, cursorCol)
+	}
+	return g.resizeReflow(newCols, newRows, cursorRow, cursorCol, savedLines, gridContinues)
+}
+
+// resizeNoReflow copies the overlapping region into a new grid without
+// re-breaking logical lines. Overflow columns beyond the old display width
+// are preserved in the backing stride.
+func (g *Grid) resizeNoReflow(newCols, newRows, cursorRow, cursorCol int) (*Grid, int, int, [][]Cell, bool) {
 	newStride := g.stride
 	if newCols > newStride {
+		newStride = newCols
+	} else if newCols < newStride && newCols < g.cols {
+		// Compact stride when shrinking well below the previous width.
+		newStride = newCols
+	}
+
+	ng := allocGrid(newStride, newRows, newCols)
+	copyRows := g.rows
+	if newRows < copyRows {
+		copyRows = newRows
+	}
+	copyCols := g.cols
+	if newCols < copyCols {
+		copyCols = newCols
+	}
+	for r := 0; r < copyRows; r++ {
+		srcBase := r * g.stride
+		dstBase := r * newStride
+		copy(ng.cells[dstBase:dstBase+copyCols], g.cells[srcBase:srcBase+copyCols])
+		if r < newRows-1 {
+			ng.wrapped[r] = g.wrapped[r]
+		}
+	}
+
+	newCursorRow, newCursorCol := cursorRow, cursorCol
+	if newCursorRow >= newRows {
+		newCursorRow = newRows - 1
+	}
+	if newCursorCol >= newCols {
+		newCursorCol = newCols - 1
+	}
+	if newCursorRow < 0 {
+		newCursorRow = 0
+	}
+	if newCursorCol < 0 {
+		newCursorCol = 0
+	}
+	ng.markDirtyAll()
+	return ng, newCursorRow, newCursorCol, nil, false
+}
+
+// resizeReflow performs full column reflow (original resize logic).
+func (g *Grid) resizeReflow(newCols, newRows, cursorRow, cursorCol int, savedLines [][]Cell, gridContinues bool) (*Grid, int, int, [][]Cell, bool) {
+	newStride := g.stride
+	if newCols > newStride {
+		newStride = newCols
+	} else if newCols < newStride && newCols < g.cols {
 		newStride = newCols
 	}
 
@@ -229,34 +276,30 @@ func (g *Grid) resize(newCols, newRows, cursorRow, cursorCol int, savedLines [][
 	}
 
 	// ── Phase 3: determine top-row discard offset ─────────────────────────────
-	// Only content up to and including the cursor's logical line determines
-	// overflow; blank trailing rows below the cursor are just empty space and
-	// must not push real content off the top.
+	// Count visual rows across all non-empty logical lines. When the total
+	// exceeds newRows, scroll the oldest visual rows into reflowSavedLines so
+	// a later vertical expand can restore them.
 
-	cursorLL := len(logicals) - 1 // fallback: last line
+	lastNonEmpty := -1
+	totalVR := 0
 	for i, ll := range logicals {
-		if ll.cursorOffset >= 0 {
-			cursorLL = i
-			break
+		if len(ll.cells) > 0 {
+			totalVR += visualRowCount[i]
+			lastNonEmpty = i
 		}
-	}
-	contentVR := 0
-	for i := 0; i <= cursorLL; i++ {
-		contentVR += visualRowCount[i]
 	}
 
 	skip := 0
-	if contentVR > newRows {
-		skip = contentVR - newRows
+	if totalVR > newRows {
+		skip = totalVR - newRows
 	}
 
-	// Cells in the skipped visual rows are preserved for a later expand.
+	// Skipped visual rows are preserved for a later expand via reflowSavedLines.
 	var newSavedLines [][]Cell
-	var scrollbackLines [][]Cell
-	if skip > 0 {
+	if skip > 0 && lastNonEmpty >= 0 {
 		var visualRows [][]Cell
 		var rowWrapped []bool
-		for i := 0; i <= cursorLL; i++ {
+		for i := 0; i <= lastNonEmpty; i++ {
 			rows, wrapped := splitLogicalLine(logicals[i].cells, newCols)
 			visualRows = append(visualRows, rows...)
 			rowWrapped = append(rowWrapped, wrapped...)
@@ -266,27 +309,12 @@ func (g *Grid) resize(newCols, newRows, cursorRow, cursorCol int, savedLines [][
 		}
 		skippedRows := visualRows[:skip]
 		skippedWrapped := rowWrapped[:skip]
-		newSavedLines = groupVisualRows(skippedRows, skippedWrapped)
-		for _, rowCells := range skippedRows {
-			line := make([]Cell, newStride)
-			copy(line, rowCells)
-			scrollbackLines = append(scrollbackLines, line)
-		}
+		newSavedLines = capSavedLines(groupVisualRows(skippedRows, skippedWrapped))
 	}
 
 	// ── Phase 4: build new grid ───────────────────────────────────────────────
 
-	ng := &Grid{
-		cells:   make([]Cell, newStride*newRows),
-		cols:    newCols,
-		stride:  newStride,
-		rows:    newRows,
-		dirty:   make([]bool, newRows),
-		wrapped: make([]bool, newRows),
-	}
-	for i := range ng.cells {
-		ng.cells[i] = blankCell
-	}
+	ng := allocGrid(newStride, newRows, newCols)
 
 	newCursorRow, newCursorCol := 0, 0
 	newRow := 0
@@ -388,7 +416,7 @@ func (g *Grid) resize(newCols, newRows, cursorRow, cursorCol int, savedLines [][
 	}
 
 	ng.markDirtyAll()
-	return ng, newCursorRow, newCursorCol, newSavedLines, scrollbackLines, newGridContinues
+	return ng, newCursorRow, newCursorCol, newSavedLines, newGridContinues
 }
 
 // splitLogicalLine breaks a logical line into visual rows at newCols width.
@@ -404,8 +432,7 @@ func splitLogicalLine(cells []Cell, newCols int) ([][]Cell, []bool) {
 		if rem := len(cells) - pos; rem < n {
 			n = rem
 		}
-		rowCells := make([]Cell, n)
-		copy(rowCells, cells[pos:pos+n])
+		rowCells := cells[pos : pos+n]
 		rows = append(rows, rowCells)
 		pos += n
 		wrapped = append(wrapped, pos < len(cells))
@@ -435,4 +462,42 @@ func groupVisualRows(visualRows [][]Cell, rowWrapped []bool) [][]Cell {
 // The slice spans the full backing stride, which may be wider than Cols().
 func (g *Grid) line(row int) []Cell {
 	return g.cells[row*g.stride : (row+1)*g.stride]
+}
+
+// lineForScrollback returns a cols-width copy of the row for scrollback storage.
+func (g *Grid) lineForScrollback(row int) []Cell {
+	line := make([]Cell, g.cols)
+	copy(line, g.cells[row*g.stride:row*g.stride+g.cols])
+	return line
+}
+
+func allocGrid(stride, rows, cols int) *Grid {
+	ng := &Grid{
+		cells:   make([]Cell, stride*rows),
+		cols:    cols,
+		stride:  stride,
+		rows:    rows,
+		dirty:   make([]bool, rows),
+		wrapped: make([]bool, rows),
+	}
+	for i := range ng.cells {
+		ng.cells[i] = blankCell
+	}
+	return ng
+}
+
+// capSavedLines drops the oldest saved logical lines when the total cell count
+// would exceed maxReflowSavedCells.
+func capSavedLines(lines [][]Cell) [][]Cell {
+	if len(lines) == 0 {
+		return lines
+	}
+	total := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		total += len(lines[i])
+		if total > maxReflowSavedCells {
+			return lines[i+1:]
+		}
+	}
+	return lines
 }

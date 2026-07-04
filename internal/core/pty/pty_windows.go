@@ -44,10 +44,7 @@ func Open(cfg Config) (PTY, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pty: %w", err)
 	}
-	env := cfg.Env
-	if env == nil {
-		env = os.Environ()
-	}
+	env := PrepareShellEnv(cfg.Env)
 
 	var childOutRead, childOutWrite windows.Handle
 	if err := windows.CreatePipe(&childOutRead, &childOutWrite, nil, 0); err != nil {

@@ -43,13 +43,16 @@ type Terminal struct {
 	appKeypad      bool // DECKPAM/DECKPNM
 	bracketedPaste bool // ?2004h
 	autoWrap       bool // DECAWM  ?7h  (default on)
+
+	reflowOnResize bool // when true, re-break wrapped lines on column resize
 }
 
 // compile-time check: Terminal implements vte.Performer.
 var _ vte.Performer = (*Terminal)(nil)
 
 // New creates a Terminal with the given initial size and scrollback capacity.
-func New(cols, rows, scrollbackLines int) *Terminal {
+// reflowOnResize controls whether column resizes re-break soft-wrapped lines.
+func New(cols, rows, scrollbackLines int, reflowOnResize bool) *Terminal {
 	if cols <= 0 {
 		cols = 80
 	}
@@ -59,11 +62,12 @@ func New(cols, rows, scrollbackLines int) *Terminal {
 	primary := newScreen(cols, rows)
 	alt := newScreen(cols, rows)
 	t := &Terminal{
-		primary:    primary,
-		alt:        alt,
-		active:     primary,
-		scrollback: newScrollback(scrollbackLines),
-		autoWrap:   true,
+		primary:        primary,
+		alt:            alt,
+		active:         primary,
+		scrollback:     newScrollback(scrollbackLines),
+		autoWrap:       true,
+		reflowOnResize: reflowOnResize,
 	}
 	return t
 }
@@ -127,32 +131,29 @@ func (t *Terminal) Resize(cols, rows int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Keep the cursor visible when shrinking: scroll the primary grid up and
-	// save displaced lines to scrollback, then resize normally.
-	if t.active == t.primary && rows < t.primary.rows() {
-		curRow := t.primary.cursor.row
-		if curRow >= rows {
-			scroll := curRow - (rows - 1)
-			oldRows := t.primary.rows()
-			for i := 0; i < scroll; i++ {
-				t.scrollback.Push(t.primary.grid.line(i))
-			}
-			t.primary.grid.scrollUp(0, oldRows-1, scroll)
-			t.primary.cursor.row -= scroll
-		}
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	if t.primary.cols() == cols && t.primary.rows() == rows {
+		return
+	}
+
+	if !t.reflowOnResize {
+		t.reflowSavedLines = nil
+		t.reflowGridContinues = false
 	}
 
 	onAlt := t.active == t.alt
 
-	primary, saved, sbLines, continues := t.primary.resize(cols, rows, t.reflowSavedLines, t.reflowGridContinues)
+	primary, saved, continues := t.primary.resize(cols, rows, t.reflowOnResize, t.reflowSavedLines, t.reflowGridContinues)
 	t.reflowSavedLines = saved
 	t.reflowGridContinues = continues
-	for _, line := range sbLines {
-		t.scrollback.Push(line)
-	}
 	t.primary = primary
 
-	t.alt, _, _, _ = t.alt.resize(cols, rows, nil, false) //nolint:dogsled // alternate screen has no reflow state
+	t.alt, _, _ = t.alt.resize(cols, rows, t.reflowOnResize, nil, false)
 
 	if onAlt {
 		t.active = t.alt
@@ -522,7 +523,7 @@ func (t *Terminal) newline(withCR bool) {
 // the scrollback buffer (primary screen only).
 func (t *Terminal) scrollUpOne(s *screen) {
 	if s == t.primary {
-		t.scrollback.Push(s.grid.line(s.scrollTop))
+		t.scrollback.Push(s.grid.lineForScrollback(s.scrollTop))
 	}
 	s.grid.scrollUp(s.scrollTop, s.scrollBot, 1)
 }
