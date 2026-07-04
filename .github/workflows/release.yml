@@ -125,11 +125,21 @@ jobs:
           go install github.com/go-task/task/v3/cmd/task@latest
 
       - name: Build NSIS installer (desktop + Start Menu shortcuts)
-        shell: bash
+        shell: pwsh
         run: |
-          if ! command -v makensis >/dev/null 2>&1; then
-            export PATH="/c/Program Files (x86)/NSIS:/c/Program Files/NSIS:$PATH"
-          fi
+          $nsisCandidates = @(
+            "${env:ProgramFiles(x86)}\NSIS",
+            "$env:ProgramFiles\NSIS"
+          )
+          foreach ($dir in $nsisCandidates) {
+            if (Test-Path "$dir\makensis.exe") {
+              $env:Path = "$dir;$env:Path"
+              break
+            }
+          }
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            throw "makensis not found in PATH"
+          }
           makensis /VERSION
           task windows:package ARCH=amd64 INSTALL_SCOPE=user
 
