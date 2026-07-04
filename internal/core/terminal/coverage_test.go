@@ -237,3 +237,175 @@ func TestSGRTrueColorAndBold(t *testing.T) {
 		t.Fatal("expected bold attribute")
 	}
 }
+
+func TestCSIMovementAndScroll(t *testing.T) {
+	term := newTerm(10, 6)
+	feed(t, term, "0123456789")
+	feed(t, term, "\x1b[1;1H")
+	feed(t, term, "\x1b[2E") // CNL: down 2 lines
+	col, row := cursorAt(t, term)
+	if row != 2 || col != 0 {
+		t.Fatalf("CNL cursor = (%d,%d), want (0,2)", col, row)
+	}
+
+	feed(t, term, "\x1b[1F") // CPL: up 1 line
+	col, row = cursorAt(t, term)
+	if row != 1 || col != 0 {
+		t.Fatalf("CPL cursor = (%d,%d), want (0,1)", col, row)
+	}
+
+	feed(t, term, "\x1b[5G") // CHA col 5
+	col, _ = cursorAt(t, term)
+	if col != 4 {
+		t.Fatalf("CHA col = %d, want 4", col)
+	}
+
+	feed(t, term, "\x1b[4d") // VPA row 4
+	_, row = cursorAt(t, term)
+	if row != 3 {
+		t.Fatalf("VPA row = %d, want 3", row)
+	}
+
+	feed(t, term, "\x1b[3X") // ECH erase 3 cells
+	for col := 3; col < 6; col++ {
+		if c := cellAt(t, term, 3, col); c.Char != ' ' {
+			t.Fatalf("ECH col %d = %q, want space", col, c.Char)
+		}
+	}
+}
+
+func TestInsertLine(t *testing.T) {
+	term := newTerm(10, 5)
+	feed(t, term, "AAAAA\r\nBBBBB\r\nCCCCC")
+	feed(t, term, "\x1b[2;1H")
+	feed(t, term, "\x1b[1L")
+	if c := cellAt(t, term, 1, 0); c.Char != ' ' {
+		t.Fatalf("IL row1 = %q, want blank", c.Char)
+	}
+}
+
+func TestDeleteLine(t *testing.T) {
+	term := newTerm(10, 5)
+	feed(t, term, "AAAAA\r\nBBBBB\r\nCCCCC")
+	feed(t, term, "\x1b[2;1H")
+	feed(t, term, "\x1b[1M")
+	if c := cellAt(t, term, 1, 0); c.Char != 'C' {
+		t.Fatalf("DL row1 = %q, want C", c.Char)
+	}
+}
+
+func TestScrollUpDown(t *testing.T) {
+	term := newTerm(10, 5)
+	feed(t, term, "AAAAA\r\nBBBBB\r\nCCCCC")
+	feed(t, term, "\x1b[1S")
+	if c := cellAt(t, term, 0, 0); c.Char != 'B' {
+		t.Fatalf("SU row0 = %q, want B", c.Char)
+	}
+	feed(t, term, "\x1b[1T")
+	if c := cellAt(t, term, 0, 0); c.Char != ' ' {
+		t.Fatalf("SD row0 = %q, want blank", c.Char)
+	}
+}
+
+func TestEraseDisplayBelowAndScrollback(t *testing.T) {
+	term := newTerm(5, 3)
+	feed(t, term, "AAAAA\r\nBBBBB\r\nCCCCC")
+	feed(t, term, "\x1b[2;1H") // row 1 col 0
+	feed(t, term, "\x1b[0J")   // ED 0: below cursor (inclusive)
+	if c := cellAt(t, term, 0, 0); c.Char != 'A' {
+		t.Fatalf("ED0 row0 should remain, got %q", c.Char)
+	}
+	if c := cellAt(t, term, 2, 0); c.Char != ' ' {
+		t.Fatalf("ED0 row2 should be erased")
+	}
+
+	for i := 0; i < 5; i++ {
+		feed(t, term, "line\r\n")
+	}
+	feed(t, term, "\x1b[3J") // erase display + scrollback
+	if term.ScrollbackLen() != 0 {
+		t.Fatalf("scrollback = %d, want 0 after ED3", term.ScrollbackLen())
+	}
+}
+
+func TestAltScreen1049(t *testing.T) {
+	term := newTerm(10, 5)
+	feed(t, term, "PRIMARY")
+	feed(t, term, "\x1b[?1049h")
+	feed(t, term, "ALTSCREEN")
+	if c := cellAt(t, term, 0, 0); c.Char != 'A' {
+		t.Fatalf("alt screen = %q, want A", c.Char)
+	}
+	feed(t, term, "\x1b[?1049l")
+	if c := cellAt(t, term, 0, 0); c.Char != 'P' {
+		t.Fatalf("primary restored = %q, want P", c.Char)
+	}
+}
+
+func TestDecModesDisable(t *testing.T) {
+	term := newTerm(10, 5)
+	feed(t, term, "\x1b[?1h\x1b[?2004h\x1b[?7h")
+	feed(t, term, "\x1b[?1l\x1b[?2004l\x1b[?7l")
+	if term.AppCursorKeys() || term.BracketedPaste() {
+		t.Fatal("expected private modes disabled")
+	}
+}
+
+func TestSGRBlinkAndANSIColors(t *testing.T) {
+	term := newTerm(10, 3)
+	feed(t, term, "\x1b[5;31;43mR\x1b[0m")
+	c := cellAt(t, term, 0, 0)
+	if c.Char != 'R' {
+		t.Fatalf("char = %q", c.Char)
+	}
+	if c.Attrs&terminal.AttrBlink == 0 {
+		t.Fatal("expected blink")
+	}
+	if c.FG.Kind != terminal.ColorANSI || c.BG.Kind != terminal.ColorANSI {
+		t.Fatal("expected ANSI fg/bg")
+	}
+}
+
+func TestSGRIndexedBackground(t *testing.T) {
+	term := newTerm(10, 3)
+	feed(t, term, "\x1b[48;5;33mB\x1b[0m")
+	c := cellAt(t, term, 0, 0)
+	if c.BG.Kind != terminal.ColorIndexed || c.BG.Value != 33 {
+		t.Fatalf("bg = %+v", c.BG)
+	}
+}
+
+func TestWideRuneWidthManyBlocks(t *testing.T) {
+	term := newTerm(30, 3)
+	feed(t, term, "\u1100\u2E80\u4E00\uFF01\U0001F300")
+	foundWide := 0
+	for col := 0; col < term.Cols(); col++ {
+		if cellAt(t, term, 0, col).Width == 2 {
+			foundWide++
+		}
+	}
+	if foundWide < 4 {
+		t.Fatalf("expected multiple wide cells, got %d", foundWide)
+	}
+}
+
+func TestRestoreCursorClampsOutOfBounds(t *testing.T) {
+	term := newTerm(5, 3)
+	feed(t, term, "\x1b[5;5H")
+	feed(t, term, "\x1b7")
+	term.Resize(3, 2)
+	feed(t, term, "\x1b8")
+	col, row := cursorAt(t, term)
+	if col >= term.Cols() || row >= term.Rows() {
+		t.Fatalf("restored cursor (%d,%d) out of bounds", col, row)
+	}
+}
+
+func TestPendingWrapWideCharAtLastColumn(t *testing.T) {
+	term := newTerm(5, 3)
+	feed(t, term, strings.Repeat("X", 4))
+	feed(t, term, "\u4e16") // wide char at last col triggers pad+wrap path
+	if cellAt(t, term, 0, 4).Char != ' ' {
+		t.Fatalf("col4 = %q, want space pad", cellAt(t, term, 0, 4).Char)
+	}
+}

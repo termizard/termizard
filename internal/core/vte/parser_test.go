@@ -58,6 +58,17 @@ func (r *recorder) DCS(_ [][]uint16, _ []byte, _ bool, _ rune) {}
 func (r *recorder) DCSPut(_ byte)                              {}
 func (r *recorder) DCSUnhook()                                 {}
 
+type dcsRecorder struct {
+	recorder
+	hooked bool
+	puts   []byte
+	unhook bool
+}
+
+func (d *dcsRecorder) DCS(_ [][]uint16, _ []byte, _ bool, _ rune) { d.hooked = true }
+func (d *dcsRecorder) DCSPut(b byte)                              { d.puts = append(d.puts, b) }
+func (d *dcsRecorder) DCSUnhook()                                 { d.unhook = true }
+
 func parse(input string) *recorder {
 	rec := &recorder{}
 	p := vte.New()
@@ -264,6 +275,35 @@ func TestAnywhereCancelsMidCSI(t *testing.T) {
 	}
 	if string(rec.prints) != "hello" {
 		t.Fatalf("prints after cancel: %q", string(rec.prints))
+	}
+}
+
+func TestUTF8InvalidContinuation(t *testing.T) {
+	rec := parse("\xC2A") // broken UTF-8 sequence
+	if len(rec.prints) == 0 {
+		t.Fatal("expected replacement or partial print")
+	}
+}
+
+func TestDCSSequenceDispatches(t *testing.T) {
+	d := &dcsRecorder{}
+	p := vte.New()
+	p.Advance(d, []byte("\x1bP1;2;3zdata\x1b\\"))
+	if !d.hooked {
+		t.Fatal("expected DCS hook")
+	}
+	if !d.unhook {
+		t.Fatal("expected DCS unhook")
+	}
+}
+
+func TestOSCStringTerminator(t *testing.T) {
+	rec := parse("\x1b]0;Title\x1b\\")
+	if len(rec.oscs) != 1 {
+		t.Fatalf("oscs = %d", len(rec.oscs))
+	}
+	if string(rec.oscs[0].params[0]) != "0" || string(rec.oscs[0].params[1]) != "Title" {
+		t.Fatalf("osc params = %v", rec.oscs[0].params)
 	}
 }
 

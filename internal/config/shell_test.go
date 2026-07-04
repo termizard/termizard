@@ -17,6 +17,18 @@ func TestShellCommandNoOhMyZsh(t *testing.T) {
 	}
 }
 
+func TestShellCommandZshWithNoRCSFlag(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Shell.Program = "/bin/zsh"
+	cfg.Shell.Args = []string{"--no-rcs", "-l"}
+	cfg.Shell.NoOhMyZsh = true
+
+	cmd := cfg.ShellCommand()
+	if cmd[0] != "/bin/zsh" || cmd[1] != "--no-rcs" || cmd[2] != "-l" {
+		t.Fatalf("unexpected argv: %v", cmd)
+	}
+}
+
 func TestShellCommandPreservesExplicitZshArgs(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Shell.Program = "zsh"

@@ -132,6 +132,19 @@ func TestDefaultPathFallbackHome(t *testing.T) {
 	}
 }
 
+func TestDefaultPathUsesUserProfile(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	dir := t.TempDir()
+	t.Setenv("USERPROFILE", dir)
+
+	got := config.DefaultPath()
+	want := filepath.Join(dir, ".config", "termizard", "config.toml")
+	if got != want {
+		t.Fatalf("DefaultPath() = %q, want %q", got, want)
+	}
+}
+
 func TestShellCommandWithoutOhMyZshOnNonZshProgram(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Shell.Program = "/usr/bin/fish"

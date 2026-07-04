@@ -17,6 +17,16 @@ func TestResizeNoOpSameSize(t *testing.T) {
 	}
 }
 
+func TestRLockRUnlockSnapshot(t *testing.T) {
+	term := New(5, 3, 100, true)
+	term.RLock()
+	cols := term.active.cols()
+	term.RUnlock()
+	if cols != 5 {
+		t.Fatalf("cols = %d, want 5", cols)
+	}
+}
+
 func TestDCSStubsAreNoOps(t *testing.T) {
 	term := New(10, 5, 100, true)
 	term.DCS(nil, nil, false, 'q')

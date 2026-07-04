@@ -96,6 +96,29 @@ func TestPrepareShellEnvNilUsesProcessEnv(t *testing.T) {
 	}
 }
 
+func TestSetIfEmptyPreservesExisting(t *testing.T) {
+	m := map[string]string{"TERM": "screen"}
+	setIfEmpty(m, "TERM", "xterm")
+	if m["TERM"] != "screen" {
+		t.Fatalf("TERM = %q, want screen", m["TERM"])
+	}
+}
+
+func TestSetIfEmptySkipsBlankValue(t *testing.T) {
+	m := map[string]string{}
+	setIfEmpty(m, "TERM", "")
+	if _, ok := m["TERM"]; ok {
+		t.Fatal("empty value should not be set")
+	}
+}
+
+func TestStandardPathEntriesNonEmpty(t *testing.T) {
+	entries := standardPathEntries()
+	if len(entries) == 0 {
+		t.Fatal("expected standard path entries")
+	}
+}
+
 func TestDefaultShellFallback(t *testing.T) {
 	t.Setenv("SHELL", "")
 	if sh := DefaultShell(); sh == "" {
