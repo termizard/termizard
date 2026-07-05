@@ -1,5 +1,4 @@
 // Wails v3 bindings for TerminalService (github.com/termizard/termizard/internal/ui/wails).
-// Calls are routed to the correct PTY session server-side via window context.
 import { Call, type CancellablePromise } from '@wailsio/runtime'
 
 const pkg = 'github.com/termizard/termizard/internal/ui/wails.TerminalService'
@@ -27,17 +26,47 @@ export interface XTermTheme {
   brightWhite: string
 }
 
+export type TitlePosition = 'left' | 'center' | 'right'
+export type TabLabelMode = 'path' | 'index'
+
 export interface XTermConfig {
   fontSize: number
   fontFamily: string
   cursorStyle: 'block' | 'bar' | 'underline'
   cursorBlink: boolean
   showTitleBar: boolean
+  titlePosition: TitlePosition
+  paddingX: number
+  paddingY: number
   theme: XTermTheme
+  keybindings: KeyBinding[]
+}
+
+export interface KeyBinding {
+  key: string
+  mods: string[]
+  action: string
+}
+
+export interface TabInfo {
+  id: number
+  title?: string
+}
+
+export interface TabsResponse {
+  enabled: boolean
+  label: TabLabelMode
+  showNewButton: boolean
+  showWhenSingle: boolean
+  items: TabInfo[]
 }
 
 export function GetConfig(): CancellablePromise<XTermConfig> {
   return Call.ByName(`${pkg}.GetConfig`)
+}
+
+export function GetTabs(): CancellablePromise<TabsResponse> {
+  return Call.ByName(`${pkg}.GetTabs`)
 }
 
 export function GetInitialTitle(): CancellablePromise<string> {
@@ -52,16 +81,24 @@ export function ToggleMaximize(): CancellablePromise<void> {
   return Call.ByName(`${pkg}.ToggleMaximize`)
 }
 
-export function SendInput(data: string): CancellablePromise<void> {
-  return Call.ByName(`${pkg}.SendInput`, data)
+export function SendInput(tabId: number, data: string): CancellablePromise<void> {
+  return Call.ByName(`${pkg}.SendInput`, tabId, data)
 }
 
-export function Resize(cols: number, rows: number): CancellablePromise<void> {
-  return Call.ByName(`${pkg}.Resize`, cols, rows)
+export function Resize(tabId: number, cols: number, rows: number): CancellablePromise<void> {
+  return Call.ByName(`${pkg}.Resize`, tabId, cols, rows)
 }
 
-export function Ready(cols: number, rows: number): CancellablePromise<void> {
-  return Call.ByName(`${pkg}.Ready`, cols, rows)
+export function Ready(tabId: number, cols: number, rows: number): CancellablePromise<void> {
+  return Call.ByName(`${pkg}.Ready`, tabId, cols, rows)
+}
+
+export function NewTab(): CancellablePromise<TabInfo> {
+  return Call.ByName(`${pkg}.NewTab`)
+}
+
+export function CloseTab(tabId: number): CancellablePromise<void> {
+  return Call.ByName(`${pkg}.CloseTab`, tabId)
 }
 
 export function NewWindow(): CancellablePromise<void> {

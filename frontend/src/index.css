@@ -13,6 +13,14 @@
   --jb-title-text: rgba(188, 190, 196, 0.75);
   --jb-border: rgba(255, 255, 255, 0.08);
   --titlebar-side: 78px;
+  --chrome-titlebar-height: 38px;
+  --mac-traffic-light-zone: 28px;
+  --terminal-font-size: 13px;
+  --terminal-padding-x: 6px;
+  --terminal-padding-y: 6px;
+  --chrome-tabbar-height: 36px;
+  --tab-notch-width: max(22px, calc(var(--terminal-font-size) * 1.45));
+  --tab-notch-half: max(12px, calc(var(--terminal-font-size) * 0.78));
 }
 
 html, body, #root {
@@ -46,7 +54,8 @@ html, body, #root {
     var(--jb-bg-base) 100%
   );
   background-size: 400% 400%;
-  animation: jb-shimmer 20s ease infinite;
+  animation: none;
+  background-position: var(--jb-shimmer-x, 0%) var(--jb-shimmer-y, 50%);
   pointer-events: none;
 }
 
@@ -56,30 +65,84 @@ html, body, #root {
   66%       { background-position: 50% 100%; }
 }
 
+/* xterm drops CURSOR_BLINK_CLASS when unfocused — blink the cursor element directly */
+.terminal-pane--cursor-blink .xterm .xterm-cursor {
+  animation: termizard-cursor-blink 1s step-end infinite !important;
+}
+
+@keyframes termizard-cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
 /* ── Title bar ─────────────────────────────────────────────────────────── */
 
 .titlebar {
   flex-shrink: 0;
-  height: 38px;
-  display: flex;
+  height: var(--chrome-titlebar-height);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: center;
   background: var(--jb-titlebar);
   border-bottom: 1px solid var(--jb-border);
   --wails-draggable: drag;
   user-select: none;
-  position: relative;
   z-index: 2;
-  padding: 0 16px;
 }
 
-/* macOS traffic lights occupy the left inset — balance with matching padding */
 .titlebar--mac {
-  padding-left: 78px;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  height: var(--chrome-titlebar-height);
+  padding: 0;
+}
+
+.titlebar-mac-gutter {
+  flex: 0 0 78px;
+  width: 78px;
+  height: var(--mac-traffic-light-zone);
+  --wails-draggable: drag;
+}
+
+.titlebar-mac-body {
+  flex: 1;
+  min-width: 0;
+  height: var(--chrome-titlebar-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  --wails-draggable: drag;
+}
+
+.titlebar--mac.titlebar--align-left .titlebar-mac-body {
+  justify-content: flex-start;
+  padding-left: 4px;
+}
+
+.titlebar--mac.titlebar--align-right .titlebar-mac-body {
+  justify-content: flex-end;
   padding-right: 16px;
 }
 
+.titlebar--mac .titlebar-title {
+  grid-column: unset;
+  justify-self: unset;
+}
+
+.titlebar--mac .titlebar-side--left {
+  display: none;
+}
+
+.titlebar--win .titlebar-side--right,
+.titlebar--linux .titlebar-side--right {
+  padding-right: 138px;
+}
+
 .titlebar-title {
+  grid-column: 2;
+  justify-self: center;
+  max-width: min(60vw, 480px);
   font-size: 12.5px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-weight: 500;
@@ -92,6 +155,240 @@ html, body, #root {
   line-height: 1;
 }
 
+.titlebar--align-left .titlebar-title {
+  grid-column: 1;
+  justify-self: start;
+  max-width: none;
+  width: 100%;
+  padding-right: 16px;
+}
+
+.titlebar--align-left .titlebar-side--left {
+  display: none;
+}
+
+.titlebar--align-right .titlebar-title {
+  grid-column: 3;
+  justify-self: end;
+  max-width: none;
+  width: 100%;
+  padding-left: 16px;
+}
+
+.titlebar--align-right .titlebar-side--right {
+  display: none;
+}
+
+/* ── Tab bar (Rio-style: full-height tabs, scroll, live reorder) ────────── */
+
+.tabbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  height: var(--chrome-tabbar-height);
+  background: rgba(0, 0, 0, 0.22);
+  border-bottom: 1px solid var(--jb-border);
+  overflow: hidden;
+  z-index: 3;
+  --wails-draggable: no-drag;
+  user-select: none;
+}
+
+.tabbar--dragging {
+  cursor: grabbing;
+}
+
+.tabbar--dragging .tabbar-item-wrap:not(.tabbar-item-wrap--dragging) {
+  transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.tabbar-scroll {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.tabbar-scroll::-webkit-scrollbar {
+  height: 4px;
+  width: 0;
+}
+
+.tabbar-scroll::-webkit-scrollbar:vertical {
+  display: none;
+}
+
+.tabbar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.tabbar-tabs {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  min-width: 100%;
+}
+
+.tabbar-tabs--overflow {
+  width: max-content;
+}
+
+.tabbar-item-wrap {
+  flex: 1 1 0;
+  min-width: 120px;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  box-sizing: border-box;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: default;
+  will-change: transform;
+}
+
+.tabbar-tabs--overflow .tabbar-item-wrap {
+  flex: 0 0 140px;
+  width: 140px;
+  min-width: 140px;
+}
+
+.tabbar-item-wrap--active {
+  background: var(--jb-bg-base);
+  z-index: 1;
+}
+
+.tabbar-tabs--overflow .tabbar-item-wrap--active {
+  position: sticky;
+  z-index: 4;
+}
+
+.tabbar-tabs--overflow .tabbar-item-wrap--active.tabbar-item-wrap--pin-left {
+  left: 0;
+}
+
+.tabbar-tabs--overflow .tabbar-item-wrap--active.tabbar-item-wrap--pin-right {
+  left: auto;
+  right: 0;
+}
+
+.tabbar-tabs--overflow .tabbar-item-wrap--active.tabbar-item-wrap--pin-left {
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.35);
+}
+
+.tabbar-tabs--overflow .tabbar-item-wrap--active.tabbar-item-wrap--pin-right {
+  box-shadow: -4px 0 12px rgba(0, 0, 0, 0.35);
+}
+
+.tabbar-item-wrap--dragging {
+  position: relative;
+  z-index: 10;
+  cursor: grabbing;
+  opacity: 0.95;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+.tabbar-item-wrap--active::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translate(-50%, 50%);
+  width: 0;
+  height: 0;
+  border-left: var(--tab-notch-width) solid transparent;
+  border-right: var(--tab-notch-width) solid transparent;
+  border-bottom: var(--tab-notch-half) solid var(--jb-bg-base);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.tabbar-item {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0 10px 0 6px;
+  font-size: 12.5px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 500;
+  color: rgba(188, 190, 196, 0.55);
+  background: transparent;
+  cursor: inherit;
+  --wails-draggable: no-drag;
+}
+
+.tabbar-item-wrap--active .tabbar-item {
+  color: rgba(223, 225, 229, 0.95);
+}
+
+.tabbar-item-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1;
+  color: inherit;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+  --wails-draggable: no-drag;
+}
+
+.tabbar-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  padding: 0 6px;
+}
+
+.tabbar-item-wrap:hover .tabbar-item-close,
+.tabbar-item-wrap--active .tabbar-item-close {
+  opacity: 0.55;
+}
+
+.tabbar-item-close:hover {
+  opacity: 1 !important;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tabbar-item-wrap:not(.tabbar-item-wrap--active):hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tabbar-new {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 100%;
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 20px;
+  line-height: 1;
+  color: rgba(188, 190, 196, 0.65);
+  background: transparent;
+  cursor: pointer;
+  --wails-draggable: no-drag;
+}
+
+.tabbar-new:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(223, 225, 229, 0.9);
+}
+
 /* ── Terminal ───────────────────────────────────────────────────────────── */
 
 .terminal-container {
@@ -100,6 +397,18 @@ html, body, #root {
   overflow: hidden;
   position: relative;
   z-index: 1;
+  padding: var(--terminal-padding-y) var(--terminal-padding-x);
+  box-sizing: border-box;
+}
+
+.terminal-pane {
+  display: none;
+  width: 100%;
+  height: 100%;
+}
+
+.terminal-pane--active {
+  display: block;
 }
 
 .xterm {

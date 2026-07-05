@@ -1,0 +1,19 @@
+# termizard bundled bash — Kali twoline prompt layout
+
+shopt -s checkwinsize 2>/dev/null || true
+HISTFILE=${HOME}/.termizard_history
+HISTSIZE=10000
+HISTFILESIZE=10000
+
+PS1=$'┌──(\u㉿\h)-[\w]\n└─$(if [ $EUID -eq 0 ]; then echo "#"; else echo "$"; fi) '
+
+case "$TERM" in
+xterm*|rxvt*|Eterm|aterm|kterm|gnome*|alacritty|*-256color)
+  PS1="\[\e]0;\u@\h: \w\a\]$PS1"
+  ;;
+esac
+
+if [ -z "${TERMIZARD_PROMPT_INIT:-}" ]; then
+  export TERMIZARD_PROMPT_INIT=1
+  printf '\n'
+fi

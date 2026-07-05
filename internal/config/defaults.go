@@ -10,15 +10,22 @@ const (
 func Defaults() *Config {
 	return &Config{
 		Window: WindowConfig{
-			Title:        "termizard",
-			Width:        1200,
-			Height:       800,
-			MinWidth:     400,
-			MinHeight:    240,
-			Opacity:      1.0,
-			PaddingX:     6,
-			PaddingY:     6,
-			ShowTitleBar: true,
+			Title:         "termizard",
+			TitlePosition: TitleAlignCenter,
+			Width:         1200,
+			Height:        800,
+			MinWidth:      400,
+			MinHeight:     240,
+			Opacity:       1.0,
+			PaddingX:      6,
+			PaddingY:      6,
+			ShowTitleBar:  true,
+		},
+		Tabs: TabsConfig{
+			Enabled:        false,
+			Label:          TabLabelPath,
+			ShowNewButton:  true,
+			ShowWhenSingle: false,
 		},
 		Terminal: TerminalConfig{
 			InitialCols:    80,
@@ -35,7 +42,7 @@ func Defaults() *Config {
 			// Semi-transparent so the animated backdrop shows through xterm.js.
 			Background: "rgba(30, 31, 34, 0.82)",
 			Foreground: "#BCBEC4",
-			Cursor:     "#FFCC66",
+			Cursor:     "#BCBEC4",
 			Selection:  "rgba(33, 66, 131, 0.85)",
 			ANSI: ANSIColors{
 				Black:         "#2B2B2B",
@@ -65,8 +72,17 @@ func Defaults() *Config {
 		Keybindings: []Keybinding{
 			{Key: "v", Mods: []string{modCtrl, modShift}, Action: "Paste"},
 			{Key: "c", Mods: []string{modCtrl, modShift}, Action: "Copy"},
+			{Key: "k", Mods: []string{modCtrl, modShift}, Action: "Clear"},
 			{Key: "Up", Mods: []string{modCtrl, modShift}, Action: "ScrollUp"},
 			{Key: "Down", Mods: []string{modCtrl, modShift}, Action: "ScrollDown"},
+			{Key: "PageUp", Mods: []string{}, Action: "ScrollPageUp"},
+			{Key: "PageDown", Mods: []string{}, Action: "ScrollPageDown"},
+			{Key: "Home", Mods: []string{modCtrl}, Action: "ScrollTop"},
+			{Key: "End", Mods: []string{modCtrl}, Action: "ScrollBottom"},
+			{Key: "=", Mods: []string{modCtrl}, Action: "FontIncrease"},
+			{Key: "+", Mods: []string{modCtrl, modShift}, Action: "FontIncrease"},
+			{Key: "-", Mods: []string{modCtrl}, Action: "FontDecrease"},
+			{Key: "0", Mods: []string{modCtrl}, Action: "FontReset"},
 		},
 	}
 }
