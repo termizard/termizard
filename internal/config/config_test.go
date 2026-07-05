@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -367,6 +368,9 @@ func TestDefaultPathUsesUserHomeDirFallback(t *testing.T) {
 }
 
 func TestEnsureDefaultFileStatPermissionError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based permission test not supported on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("chmod-based permission test unreliable as root")
 	}
