@@ -145,7 +145,6 @@ function platformBindings(): Binding[] {
   if (isMac) {
     return [
       { key: 'k', mods: { ctrl: false, shift: false, alt: false, meta: true }, action: 'Clear' },
-      { key: 'v', mods: { ctrl: false, shift: false, alt: false, meta: true }, action: 'Paste' },
       { key: 'c', mods: { ctrl: false, shift: false, alt: false, meta: true }, action: 'Copy' },
       { key: '=', mods: { ctrl: false, shift: false, alt: false, meta: true }, action: 'FontIncrease' },
       { key: '+', mods: { ctrl: false, shift: false, alt: false, meta: true }, action: 'FontIncrease' },
@@ -156,7 +155,6 @@ function platformBindings(): Binding[] {
 
   return [
     { key: 'Insert', mods: { ctrl: true, shift: false, alt: false, meta: false }, action: 'Copy' },
-    { key: 'Insert', mods: { ctrl: false, shift: true, alt: false, meta: false }, action: 'Paste' },
   ]
 }
 
