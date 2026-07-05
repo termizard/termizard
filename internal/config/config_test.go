@@ -314,3 +314,78 @@ func TestTabItemDisplayTitle(t *testing.T) {
 		t.Fatalf("DisplayTitle(1) = %q", item.DisplayTitle(1))
 	}
 }
+
+func TestTabsActive(t *testing.T) {
+	cfg := config.Defaults()
+	if cfg.TabsActive() {
+		t.Fatal("expected tabs inactive by default")
+	}
+	cfg.Tabs.Enabled = true
+	if !cfg.TabsActive() {
+		t.Fatal("expected tabs active when enabled")
+	}
+}
+
+func TestLoadInvalidTabLabelFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[tabs]\nlabel = \"bogus\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tabs.Label != config.TabLabelPath {
+		t.Fatalf("label = %q, want path fallback", cfg.Tabs.Label)
+	}
+}
+
+func TestLoadDirectoryPathReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	_, err := config.Load(dir)
+	if err == nil {
+		t.Fatal("expected error when config path is a directory")
+	}
+}
+
+func TestDefaultPathUsesUserHomeDirFallback(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+
+	want, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("UserHomeDir unavailable")
+	}
+
+	got := config.DefaultPath()
+	expect := filepath.Join(want, ".config", "termizard", "config.toml")
+	if got != expect {
+		t.Fatalf("DefaultPath() = %q, want %q", got, expect)
+	}
+}
+
+func TestEnsureDefaultFileStatPermissionError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("chmod-based permission test unreliable as root")
+	}
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(parent, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	path := filepath.Join(parent, "termizard", "config.toml")
+	if err := config.EnsureDefaultFile(path); err == nil {
+		t.Fatal("expected error when parent directory is not accessible")
+	}
+}
+
+func TestEnsureDefaultFileStatNotDirectory(t *testing.T) {
+	path := filepath.Join(os.DevNull, "termizard", "config.toml")
+	if err := config.EnsureDefaultFile(path); err == nil {
+		t.Fatal("expected error when config path parent is not a directory")
+	}
+}
