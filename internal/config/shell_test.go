@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/termizard/termizard/internal/config"
+	"github.com/termizard/termizard/internal/core/pty"
 )
 
 func TestShellCommandNoOhMyZshKaliPrompt(t *testing.T) {
@@ -240,16 +241,15 @@ func TestShellEnvironmentUsesDefaultShellProgram(t *testing.T) {
 	}
 }
 
-func TestShellCommandWithoutOhMyZshEmptyProgramUsesDefaultShell(t *testing.T) {
+func TestShellCommandEmptyProgramUsesDefaultShell(t *testing.T) {
 	t.Setenv("SHELL", "")
 	cfg := config.Defaults()
 	cfg.Shell.Program = ""
-	cfg.Shell.NoOhMyZsh = true
-	cfg.Shell.Prompt = "none"
 
 	cmd := cfg.ShellCommand()
-	if len(cmd) < 2 || cmd[1] != "-f" {
-		t.Fatalf("ShellCommand() = %v, want -f on default zsh shell", cmd)
+	want := pty.DefaultShell()
+	if len(cmd) == 0 || cmd[0] != want {
+		t.Fatalf("ShellCommand() = %v, want program %q", cmd, want)
 	}
 }
 
