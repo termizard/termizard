@@ -2,17 +2,27 @@
 package config
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
+)
+
+const (
+	TitleAlignLeft   = "left"
+	TitleAlignCenter = "center"
+	TitleAlignRight  = "right"
+
+	TabLabelPath  = "path"
+	TabLabelIndex = "index"
 )
 
 // Config holds all user-configurable terminal settings.
 type Config struct {
 	Window      WindowConfig
+	Tabs        TabsConfig
 	Terminal    TerminalConfig
 	Font        FontConfig
 	Colors      ColorConfig
@@ -23,15 +33,31 @@ type Config struct {
 }
 
 type WindowConfig struct {
-	Title        string
-	Width        int
-	Height       int
-	MinWidth     int
-	MinHeight    int
-	Opacity      float64
-	PaddingX     int
-	PaddingY     int
-	ShowTitleBar bool `toml:"show_title_bar"`
+	Title         string
+	TitlePosition string `toml:"title_position"`
+	Width         int
+	Height        int
+	MinWidth      int
+	MinHeight     int
+	Opacity       float64
+	PaddingX      int  `toml:"padding_x"`
+	PaddingY      int  `toml:"padding_y"`
+	ShowTitleBar  bool `toml:"show_title_bar"`
+}
+
+type TabsConfig struct {
+	Enabled        bool
+	Label          string `toml:"label"` // path | index
+	ShowNewButton  bool   `toml:"show_new_button"`
+	ShowWhenSingle bool   `toml:"show_when_single"`
+}
+
+// TabItem holds optional per-tab shell overrides (reserved for future use).
+type TabItem struct {
+	Title   string
+	Cwd     string
+	Program string
+	Args    []string
 }
 
 type TerminalConfig struct {
@@ -74,9 +100,10 @@ type ANSIColors struct {
 }
 
 type ShellConfig struct {
-	Program   string
-	Args      []string
-	NoOhMyZsh bool // skip .zshrc (oh-my-zsh) — bare zsh for testing
+	Program   string   `toml:"program"`
+	Args      []string `toml:"args"`
+	NoOhMyZsh bool     `toml:"no_oh_my_zsh"` // skip user rc; use bundled prompt when prompt = "kali"
+	Prompt    string   `toml:"prompt"`       // kali | none — twoline box prompt when no_oh_my_zsh
 }
 
 type ScrollbackConfig struct {
@@ -95,7 +122,14 @@ type Keybinding struct {
 	Action string
 }
 
-// EnsureDefaultFile writes Defaults() to path when the file does not exist yet.
+const minimalDefaultConfig = `# termizard user config
+# Full reference: https://github.com/termizard/termizard/blob/main/config.example.toml
+
+[window]
+show_title_bar = true
+`
+
+// EnsureDefaultFile writes a minimal config template when the file does not exist yet.
 func EnsureDefaultFile(path string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
@@ -105,13 +139,7 @@ func EnsureDefaultFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec
 		return err
 	}
-	var buf bytes.Buffer
-	buf.WriteString("# termizard default configuration\n")
-	buf.WriteString("# https://github.com/termizard/termizard\n\n")
-	if err := toml.NewEncoder(&buf).Encode(Defaults()); err != nil {
-		return err
-	}
-	return os.WriteFile(path, buf.Bytes(), 0o644) //nolint:gosec
+	return os.WriteFile(path, []byte(minimalDefaultConfig), 0o644) //nolint:gosec
 }
 
 // Load reads the config file at path and merges it over Defaults().
@@ -128,7 +156,36 @@ func Load(path string) (*Config, error) {
 	if _, err := toml.Decode(string(data), cfg); err != nil {
 		return cfg, err
 	}
+	normalize(cfg)
 	return cfg, nil
+}
+
+func normalize(cfg *Config) {
+	cfg.Window.TitlePosition = normalizeTitlePosition(cfg.Window.TitlePosition)
+	cfg.Tabs.Label = normalizeTabLabel(cfg.Tabs.Label)
+}
+
+func normalizeTitlePosition(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case TitleAlignLeft, TitleAlignCenter, TitleAlignRight:
+		return strings.ToLower(strings.TrimSpace(v))
+	default:
+		return TitleAlignCenter
+	}
+}
+
+func normalizeTabLabel(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case TabLabelPath, TabLabelIndex:
+		return strings.ToLower(strings.TrimSpace(v))
+	default:
+		return TabLabelPath
+	}
+}
+
+// TabsActive reports whether in-window tabbing is enabled.
+func (cfg *Config) TabsActive() bool {
+	return cfg.Tabs.Enabled
 }
 
 // DefaultPath returns the XDG-compliant config file path.

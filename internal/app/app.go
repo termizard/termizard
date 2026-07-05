@@ -58,10 +58,16 @@ func New(cfg *config.Config) (*App, error) {
 			rows = 24
 		}
 		c, r := pty.ClampSize(cols, rows)
+		env, err := cfg.ShellEnvironment(nil)
+		if err != nil {
+			logger.Get().Warn("shell env setup failed", "err", err)
+			env = nil
+		}
 		np, err := pty.Open(pty.Config{
 			Command: cfg.ShellCommand(),
 			Cols:    c,
 			Rows:    r,
+			Env:     env,
 		})
 		if err != nil {
 			return err

@@ -1,0 +1,154 @@
+# termizard configuration reference
+#
+# Copy to ~/.config/termizard/config.toml and edit.
+# The app ships with full defaults in code; only override what you need.
+
+# ── Window ──────────────────────────────────────────────────────────────────
+
+[window]
+# title = "termizard"
+# title_position = "center"  # left | center | right
+show_title_bar = true
+# width = 1200
+# height = 800
+# min_width = 400
+# min_height = 240
+# opacity = 1.0
+# padding_x = 6
+# padding_y = 6
+
+# ── Tabs ────────────────────────────────────────────────────────────────────
+# One tab on startup. Add more via + button or hotkeys (kitty-style defaults).
+# Mac: Cmd+T new, Cmd+W close, Cmd+Shift+]/[ next/prev tab.
+
+[tabs]
+enabled = false
+# label = "path"            # path (shell title) | index (Tab 1, Tab 2, …)
+# show_new_button = true      # + button when tab bar is visible
+# show_when_single = false    # hide tab bar while only one tab is open
+
+# ── Terminal ────────────────────────────────────────────────────────────────
+
+[terminal]
+# initial_cols = 80
+# initial_rows = 24
+# reflow_on_resize = true
+
+# ── Font ────────────────────────────────────────────────────────────────────
+
+[font]
+# family = '"Menlo", "SF Mono", "JetBrains Mono", monospace'
+# size = 13
+
+# ── Colors ──────────────────────────────────────────────────────────────────
+
+[colors]
+# background = "rgba(30, 31, 34, 0.82)"
+# foreground = "#BCBEC4"
+# cursor = "#BCBEC4"
+# selection = "rgba(33, 66, 131, 0.85)"
+
+[colors.ansi]
+# black = "#2B2B2B"
+# red = "#FF6B68"
+# green = "#A8C023"
+# yellow = "#FFC66D"
+# blue = "#5394EC"
+# magenta = "#9876AA"
+# cyan = "#299999"
+# white = "#A9B7C6"
+# bright_black = "#555555"
+# bright_red = "#FF8782"
+# bright_green = "#B8E986"
+# bright_yellow = "#FFD37F"
+# bright_blue = "#6BAFFF"
+# bright_magenta = "#C198CB"
+# bright_cyan = "#3DDAD7"
+# bright_white = "#FFFFFF"
+
+# ── Shell ───────────────────────────────────────────────────────────────────
+
+[shell]
+# program = "/bin/zsh"
+# args = ["-l"]
+# no_oh_my_zsh = true   # bare zsh in termizard (does not touch ~/.zshrc)
+# prompt = "kali"       # Kali twoline layout when no_oh_my_zsh | none
+#
+# Optional Oh My Zsh theme for iTerm/Terminal: see themes/README.md
+# (termizard never modifies your oh-my-zsh setup)
+
+# ── Scrollback ──────────────────────────────────────────────────────────────
+
+[scrollback]
+# lines = 10000
+
+# ── Cursor ──────────────────────────────────────────────────────────────────
+
+[cursor]
+# shape = "block"  # block | beam | underline
+# blink = true
+
+# ── Keybindings ─────────────────────────────────────────────────────────────
+# Linux/Windows defaults below. macOS also gets Cmd+K/V/C and Cmd+/-/0 automatically.
+# Actions: Copy, Paste, Clear, ScrollUp, ScrollDown, ScrollPageUp, ScrollPageDown,
+#          ScrollTop, ScrollBottom, FontIncrease, FontDecrease, FontReset
+#
+# [[keybindings]]
+# key = "v"
+# mods = ["Ctrl", "Shift"]
+# action = "Paste"
+#
+# [[keybindings]]
+# key = "c"
+# mods = ["Ctrl", "Shift"]
+# action = "Copy"
+#
+# [[keybindings]]
+# key = "k"
+# mods = ["Ctrl", "Shift"]
+# action = "Clear"
+#
+# [[keybindings]]
+# key = "Up"
+# mods = ["Ctrl", "Shift"]
+# action = "ScrollUp"
+#
+# [[keybindings]]
+# key = "Down"
+# mods = ["Ctrl", "Shift"]
+# action = "ScrollDown"
+#
+# [[keybindings]]
+# key = "PageUp"
+# mods = []
+# action = "ScrollPageUp"
+#
+# [[keybindings]]
+# key = "PageDown"
+# mods = []
+# action = "ScrollPageDown"
+#
+# [[keybindings]]
+# key = "Home"
+# mods = ["Ctrl"]
+# action = "ScrollTop"
+#
+# [[keybindings]]
+# key = "End"
+# mods = ["Ctrl"]
+# action = "ScrollBottom"
+#
+# [[keybindings]]
+# key = "="
+# mods = ["Ctrl"]
+# action = "FontIncrease"
+#
+# [[keybindings]]
+# key = "-"
+# mods = ["Ctrl"]
+# action = "FontDecrease"
+#
+# [[keybindings]]
+# key = "0"
+# mods = ["Ctrl"]
+# action = "FontReset"

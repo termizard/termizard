@@ -20,17 +20,15 @@ make build
 ./termizard
 ```
 
-Config is optional — defaults are used if missing:
-
-`~/.config/termizard/config.toml`
+Config works out of the box — full defaults live in code. On first run a **minimal** file is created at `~/.config/termizard/config.toml`. For all options, copy [`config.example.toml`](config.example.toml) and edit explicitly.
 
 ```toml
 [window]
 show_title_bar = true
-
-[shell]
-# no_oh_my_zsh = true   # bare zsh for testing
 ```
+
+`build/ios/` and `build/android/` are empty placeholders (no mobile build yet).
+
 
 ## Development
 
