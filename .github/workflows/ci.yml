@@ -27,6 +27,7 @@ env:
   GO_PACKAGES: ./cmd/... ./internal/...
   # Wails UI needs embedded frontend + CGO; covered by build/lint jobs.
   GO_CORE_PACKAGES: ./internal/adapter/... ./internal/config/... ./internal/core/... ./internal/ui/mock/... ./internal/util/...
+  NODE_VERSION: '24'
 
 jobs:
   build:
@@ -50,7 +51,7 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22'
+        node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
@@ -157,7 +158,7 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22'
+        node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
