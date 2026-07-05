@@ -34,7 +34,7 @@ func TestTabItemWorkingDirTildeSlashJoinsHome(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	item := config.TabItem{Cwd: "~/Projects/termizard"}
-	want := filepath.Join(home, "Projects/termizard")
+	want := filepath.Join(home, "Projects", "termizard")
 	if got := item.WorkingDir(); got != want {
 		t.Fatalf("WorkingDir() = %q, want %q", got, want)
 	}
