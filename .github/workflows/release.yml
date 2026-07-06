@@ -38,6 +38,11 @@ jobs:
           go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
           go install github.com/go-task/task/v3/cmd/task@latest
 
+      - name: Sync release version and build assets
+        run: bash scripts/sync-release-version.sh
+        env:
+          VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+
       - name: Build DMG installer
         run: task darwin:package ARCH=arm64
 
@@ -73,6 +78,11 @@ jobs:
           go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
           go install github.com/go-task/task/v3/cmd/task@latest
 
+      - name: Sync release version and build assets
+        run: bash scripts/sync-release-version.sh
+        env:
+          VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+
       - name: Build DMG installer
         run: task darwin:package ARCH=amd64
 
@@ -84,8 +94,8 @@ jobs:
             bin/termizard
             bin/termizard-macos-amd64.dmg
 
-  build-windows-amd64:
-    name: Windows amd64
+  build-windows-universal:
+    name: Windows amd64+arm64
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +141,13 @@ jobs:
           go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
           go install github.com/go-task/task/v3/cmd/task@latest
 
-      - name: Build NSIS installer (desktop + Start Menu shortcuts)
+      - name: Sync release version and build assets
+        shell: bash
+        run: bash scripts/sync-release-version.sh
+        env:
+          VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+
+      - name: Build universal NSIS installer (amd64 + arm64)
         shell: pwsh
         run: |
           $nsisCandidates = @(
@@ -148,13 +164,13 @@ jobs:
             throw "makensis not found in PATH"
           }
           makensis /VERSION
-          task windows:package ARCH=amd64 INSTALL_SCOPE=user
+          task windows:package:universal INSTALL_SCOPE=user
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: termizard-windows-amd64
-          path: bin/termizard-amd64-installer.exe
+          name: termizard-windows-universal
+          path: bin/termizard-amd64_arm64-installer.exe
 
   build-linux-amd64:
     name: Linux amd64
@@ -187,6 +203,11 @@ jobs:
           go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
           go install github.com/go-task/task/v3/cmd/task@latest
 
+      - name: Sync release version and build assets
+        run: bash scripts/sync-release-version.sh
+        env:
+          VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+
       - name: Build installers (menu + desktop shortcuts)
         run: |
           task linux:create:deb ARCH=amd64
@@ -205,7 +226,7 @@ jobs:
     needs:
       - build-macos-arm64
       - build-macos-amd64
-      - build-windows-amd64
+      - build-windows-universal
       - build-linux-amd64
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.release.tag_name != ''

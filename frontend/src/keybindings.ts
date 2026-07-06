@@ -222,8 +222,8 @@ export function handleTerminalAction(
       return false
 
     case 'Clear':
-      term.clear()
-      term.scrollToBottom()
+      term.write('\x1b[3J')
+      ctx.sendInput('\x0c')
       return false
 
     case 'ScrollUp':
