@@ -63,9 +63,9 @@ function emptyMods(): Mods {
   return { ctrl: false, shift: false, alt: false, meta: false }
 }
 
-function modsFromConfig(mods: string[]): Mods {
+function modsFromConfig(mods: string[] | null | undefined): Mods {
   const out = emptyMods()
-  for (const mod of mods) {
+  for (const mod of mods ?? []) {
     switch (mod.toLowerCase()) {
       case 'ctrl':
       case 'control':
@@ -158,7 +158,7 @@ function platformBindings(): Binding[] {
   ]
 }
 
-export function buildBindingList(config: ConfigKeybinding[]): Binding[] {
+export function buildBindingList(config: ConfigKeybinding[] | null | undefined): Binding[] {
   const seen = new Set<string>()
   const out: Binding[] = []
 
@@ -172,7 +172,7 @@ export function buildBindingList(config: ConfigKeybinding[]): Binding[] {
   for (const binding of platformBindings()) {
     add(binding)
   }
-  for (const kb of config) {
+  for (const kb of config ?? []) {
     const binding = parseConfigBinding(kb)
     if (binding) add(binding)
   }

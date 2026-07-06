@@ -555,7 +555,7 @@ export function App() {
       initTitleRef.current = initTitle
       labelModeRef.current = tabsResp.label || 'path'
 
-      keybindingsRef.current = cfg.keybindings ?? []
+      keybindingsRef.current = Array.isArray(cfg.keybindings) ? cfg.keybindings : []
       baseFontSizeRef.current = cfg.fontSize
 
       setShowTitleBar(cfg.showTitleBar)
@@ -570,14 +570,18 @@ export function App() {
       setTitle(initTitle)
       svc.SetTitle(initTitle).catch(() => {})
 
+      const tabItems = Array.isArray(tabsResp.items) && tabsResp.items.length > 0
+        ? tabsResp.items
+        : [{ id: 0 }]
+
       if (!stack) return
       stack.innerHTML = ''
-      orderRef.current = tabsResp.items.map((t) => t.id)
+      orderRef.current = tabItems.map((t) => t.id)
       activeRef.current = orderRef.current[0] ?? 0
       setActiveTab(activeRef.current)
       syncTabList()
 
-      for (const item of tabsResp.items) {
+      for (const item of tabItems) {
         await mountTab(item.id, cfg, initTitle, item.id === activeRef.current, tabsResp.enabled)
         if (disposed) return
       }
