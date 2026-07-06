@@ -59,6 +59,14 @@ html, body, #root {
   pointer-events: none;
 }
 
+:root.jb-shimmer-css .app::before {
+  animation: jb-shimmer 20s ease infinite;
+}
+
+:root.jb-shimmer-js .app::before {
+  animation: none;
+}
+
 @keyframes jb-shimmer {
   0%, 100% { background-position: 0% 50%; }
   33%       { background-position: 100% 0%; }
@@ -401,6 +409,34 @@ html, body, #root {
   box-sizing: border-box;
 }
 
+.terminal-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 1;
+}
+
+.shell-status {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jb-title-text);
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.shell-status--error {
+  color: #ff8782;
+  padding: 1rem;
+  text-align: center;
+}
+
 .terminal-pane {
   display: none;
   width: 100%;
@@ -416,9 +452,9 @@ html, body, #root {
   height: 100%;
 }
 
-.xterm .xterm-screen,
-.xterm .xterm-viewport,
-.xterm-helper-textarea {
+:root:not(.platform-windows) .xterm .xterm-screen,
+:root:not(.platform-windows) .xterm .xterm-viewport,
+:root:not(.platform-windows) .xterm-helper-textarea {
   background-color: transparent !important;
 }
 

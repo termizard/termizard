@@ -18,6 +18,10 @@ import {
 const isMac = navigator.platform.startsWith('Mac') ||
               navigator.userAgent.includes('Macintosh')
 
+const isWin = navigator.userAgent.includes('Windows')
+
+type ShellState = 'loading' | 'ready' | 'error'
+
 interface PtyPayload {
   tabId: number
   data: string
@@ -200,15 +204,23 @@ export function App() {
   const [tabList, setTabList]             = useState<{ id: number; title: string }[]>([])
   const [activeTab, setActiveTab]         = useState(0)
   const [chromeReady, setChromeReady]     = useState(false)
+  const [shellState, setShellState]       = useState<ShellState>('loading')
+  const [shellError, setShellError]       = useState<string | null>(null)
 
-  // CSS animations pause when the webview loses focus; drive the backdrop with rAF instead.
+  useEffect(() => {
+    document.documentElement.classList.toggle('platform-windows', isWin)
+  }, [])
+
+  // Backdrop shimmer: CSS when focused (or always on Windows); low-rate JS when blurred.
   useEffect(() => {
     const root = document.documentElement
-    let raf = 0
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let timer: ReturnType<typeof setInterval> | undefined
+
     const period = 20000
     const start = performance.now()
 
-    const animate = (now: number) => {
+    const updateShimmerVars = (now: number) => {
       const t = ((now - start) % period) / period
       let x = 0
       let y = 50
@@ -227,11 +239,44 @@ export function App() {
       }
       root.style.setProperty('--jb-shimmer-x', `${x}%`)
       root.style.setProperty('--jb-shimmer-y', `${y}%`)
-      raf = requestAnimationFrame(animate)
     }
 
-    raf = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(raf)
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        clearInterval(timer)
+        timer = undefined
+      }
+    }
+
+    const applyShimmerMode = () => {
+      clearTimer()
+      if (reduced.matches) {
+        root.classList.remove('jb-shimmer-css', 'jb-shimmer-js')
+        return
+      }
+      if (isWin || document.hasFocus()) {
+        root.classList.add('jb-shimmer-css')
+        root.classList.remove('jb-shimmer-js')
+        return
+      }
+      root.classList.remove('jb-shimmer-css')
+      root.classList.add('jb-shimmer-js')
+      updateShimmerVars(performance.now())
+      timer = setInterval(() => updateShimmerVars(performance.now()), 500)
+    }
+
+    applyShimmerMode()
+    window.addEventListener('focus', applyShimmerMode)
+    window.addEventListener('blur', applyShimmerMode)
+    reduced.addEventListener('change', applyShimmerMode)
+
+    return () => {
+      window.removeEventListener('focus', applyShimmerMode)
+      window.removeEventListener('blur', applyShimmerMode)
+      reduced.removeEventListener('change', applyShimmerMode)
+      clearTimer()
+      root.classList.remove('jb-shimmer-css', 'jb-shimmer-js')
+    }
   }, [])
 
   const onFontSize = useCallback((size: number) => {
@@ -372,7 +417,7 @@ export function App() {
         cursorBlink:           cfg.cursorBlink,
         cursorInactiveStyle:   inactiveCursor,
         theme:                 cfg.theme,
-        allowTransparency:     true,
+        allowTransparency:     !isWin,
         scrollback:            5000,
         scrollOnUserInput:     true,
         macOptionIsMeta:       true,
@@ -496,6 +541,9 @@ export function App() {
     }
 
     async function init() {
+      setShellState('loading')
+      setShellError(null)
+
       const [cfg, tabsResp, rawTitle] = await Promise.all([
         svc.GetConfig(),
         svc.GetTabs(),
@@ -536,9 +584,15 @@ export function App() {
 
       window.addEventListener('paste', onPaste, true)
       stack.addEventListener('contextmenu', onContextMenu)
+      setShellState('ready')
     }
 
-    init().catch(console.error)
+    init().catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      setShellError(msg)
+      setShellState('error')
+      console.error('termizard init:', err)
+    })
 
     const onWindowResize = () => {
       for (const tab of tabsRef.current.values()) {
@@ -592,7 +646,15 @@ export function App() {
           onReorder={reorderTabs}
         />
       )}
-      <div className="terminal-container" ref={stackRef} />
+      <div className="terminal-wrap">
+        {shellState === 'loading' && (
+          <div className="shell-status" aria-live="polite">Starting shell…</div>
+        )}
+        {shellState === 'error' && shellError && (
+          <div className="shell-status shell-status--error" role="alert">{shellError}</div>
+        )}
+        <div className="terminal-container" ref={stackRef} />
+      </div>
     </div>
   )
 }

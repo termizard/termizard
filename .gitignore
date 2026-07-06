@@ -29,6 +29,7 @@ build/darwin/icons.icns
 build/darwin/Assets.car
 build/windows/icon.ico
 wails_windows_*.syso
+cmd/termizard/wails_windows_*.syso
 
 # Shelved UI implementations kept for reference but not part of the build.
 _local/

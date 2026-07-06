@@ -13,10 +13,7 @@ func DefaultShell() string {
 	if sh := os.Getenv("SHELL"); sh != "" {
 		return sh
 	}
-	if runtime.GOOS == "darwin" {
-		return "/bin/zsh"
-	}
-	return "/bin/sh"
+	return platformDefaultShell()
 }
 
 // PrepareShellEnv returns an environment suitable for an interactive PTY session.
