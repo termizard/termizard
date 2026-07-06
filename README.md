@@ -57,8 +57,9 @@ Installers use `assets/logo.png` for app icons and desktop shortcuts.
 # macOS — binary + DMG (drag to Applications)
 task darwin:package ARCH=arm64
 
-# Windows — NSIS installer (desktop + Start Menu shortcuts)
-task windows:package ARCH=amd64 INSTALL_SCOPE=user
+# Windows — universal NSIS installer (amd64 + arm64; desktop + Start Menu shortcuts)
+task windows:package:universal INSTALL_SCOPE=user
+# Artifact: bin/termizard-amd64_arm64-installer.exe
 
 # Linux — .deb + AppImage (menu + desktop shortcuts)
 task linux:create:deb ARCH=amd64
