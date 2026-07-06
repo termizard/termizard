@@ -71,6 +71,9 @@ enabled = false
 [shell]
 # program = "/bin/zsh"
 # args = ["-l"]
+# Windows example:
+# program = "pwsh.exe"
+# args = []
 # no_oh_my_zsh = true   # bare zsh in termizard (does not touch ~/.zshrc)
 # prompt = "kali"       # Kali twoline layout when no_oh_my_zsh | none
 #

@@ -207,12 +207,9 @@ var _ io.ReadWriter = (*windowsPTY)(nil)
 
 func resolveCommand(cmd []string) ([]string, error) {
 	if len(cmd) > 0 {
-		return cmd, nil
+		return normalizeWindowsCommand(cmd), nil
 	}
-	if comspec := os.Getenv("COMSPEC"); comspec != "" {
-		return []string{comspec}, nil
-	}
-	return []string{`C:\Windows\System32\cmd.exe`}, nil
+	return []string{windowsDefaultShell()}, nil
 }
 
 func resolveDir(dir string) (string, error) {

@@ -1,5 +1,7 @@
 package config
 
+import "runtime"
+
 const (
 	modCtrl  = "Ctrl"
 	modShift = "Shift"
@@ -8,6 +10,13 @@ const (
 // Defaults returns the out-of-the-box configuration: JetBrains IDE dark theme,
 // colors, blinking block cursor, and JetBrains Mono as the preferred font.
 func Defaults() *Config {
+	bg := "rgba(30, 31, 34, 0.82)"
+	fontFamily := `"Menlo", "SF Mono", "JetBrains Mono", "Monaco", "Courier New", monospace`
+	if runtime.GOOS == "windows" {
+		// Opaque background: xterm allowTransparency breaks on older Windows GPUs.
+		bg = "#1e1f22"
+		fontFamily = `"Cascadia Mono", "Consolas", "Courier New", monospace`
+	}
 	return &Config{
 		Window: WindowConfig{
 			Title:         "termizard",
@@ -35,12 +44,12 @@ func Defaults() *Config {
 		Font: FontConfig{
 			// Menlo/SF Mono ship with macOS and render basic prompts reliably in
 			// the embedded WebView even when Nerd Font / JetBrains Mono are absent.
-			Family: `"Menlo", "SF Mono", "JetBrains Mono", "Monaco", "Courier New", monospace`,
+			Family: fontFamily,
 			Size:   13,
 		},
 		Colors: ColorConfig{
-			// Semi-transparent so the animated backdrop shows through xterm.js.
-			Background: "rgba(30, 31, 34, 0.82)",
+			// Semi-transparent on macOS/Linux so the animated backdrop shows through xterm.js.
+			Background: bg,
 			Foreground: "#BCBEC4",
 			Cursor:     "#BCBEC4",
 			Selection:  "rgba(33, 66, 131, 0.85)",
