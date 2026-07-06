@@ -721,16 +721,17 @@ func buildXTermConfig(cfg *config.Config) XTermConfig {
 }
 
 func buildKeybindingsJSON(bindings []config.Keybinding) []KeyBindingJSON {
-	if len(bindings) == 0 {
-		return nil
-	}
-	out := make([]KeyBindingJSON, len(bindings))
-	for i, kb := range bindings {
-		out[i] = KeyBindingJSON{
-			Key:    kb.Key,
-			Mods:   append([]string(nil), kb.Mods...),
-			Action: kb.Action,
+	out := make([]KeyBindingJSON, 0, len(bindings))
+	for _, kb := range bindings {
+		mods := kb.Mods
+		if mods == nil {
+			mods = []string{}
 		}
+		out = append(out, KeyBindingJSON{
+			Key:    kb.Key,
+			Mods:   append([]string(nil), mods...),
+			Action: kb.Action,
+		})
 	}
 	return out
 }
