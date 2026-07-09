@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/termizard/termizard/internal/core/pty"
@@ -11,25 +12,31 @@ import (
 
 // ShellCommand returns the argv for the PTY child process.
 func (cfg *Config) ShellCommand() []string {
-	var cmd []string
-	if cfg.Shell.Program != "" {
-		cmd = append([]string{cfg.Shell.Program}, cfg.Shell.Args...)
-	} else if sh := os.Getenv("SHELL"); sh != "" {
-		cmd = []string{sh}
-	} else {
-		cmd = []string{pty.DefaultShell()}
-	}
+	cmd := cfg.defaultShellArgv()
 	if cfg.usesBundledPrompt() {
 		_, bashRC, err := prompt.Materialize()
+		psProfile, _ := prompt.PowerShellProfilePath()
 		if err == nil {
-			cmd = withBundledShell(cmd, bashRC)
-			return cmd
+			return withBundledShell(cmd, bashRC, psProfile)
 		}
 	}
 	if cfg.Shell.NoOhMyZsh {
 		cmd = withoutOhMyZsh(cmd)
 	}
 	return cmd
+}
+
+func (cfg *Config) defaultShellArgv() []string {
+	if cfg.Shell.Program != "" {
+		return append([]string{cfg.Shell.Program}, cfg.Shell.Args...)
+	}
+	// Git for Windows sets $SHELL to bash.exe; ConPTY cannot run it reliably.
+	if runtime.GOOS != goosWindows {
+		if sh := os.Getenv("SHELL"); sh != "" {
+			return []string{sh}
+		}
+	}
+	return []string{pty.DefaultShell()}
 }
 
 // ShellEnvironment returns env vars for the PTY child, including bundled prompt setup.
@@ -45,8 +52,10 @@ func (cfg *Config) shellProgram() string {
 	if cfg.Shell.Program != "" {
 		return cfg.Shell.Program
 	}
-	if sh := os.Getenv("SHELL"); sh != "" {
-		return sh
+	if runtime.GOOS != goosWindows {
+		if sh := os.Getenv("SHELL"); sh != "" {
+			return sh
+		}
 	}
 	return pty.DefaultShell()
 }
@@ -59,10 +68,16 @@ func (cfg *Config) promptStyle() string {
 }
 
 func (cfg *Config) usesBundledPrompt() bool {
-	return cfg.Shell.NoOhMyZsh && cfg.promptStyle() == prompt.StyleKali
+	if cfg.promptStyle() != prompt.StyleKali {
+		return false
+	}
+	if cfg.Shell.NoOhMyZsh {
+		return true
+	}
+	return false
 }
 
-func withBundledShell(cmd []string, bashRC string) []string {
+func withBundledShell(cmd []string, bashRC, psProfile string) []string {
 	if len(cmd) == 0 {
 		return cmd
 	}
@@ -71,6 +86,8 @@ func withBundledShell(cmd []string, bashRC string) []string {
 		return withInteractiveZsh(cmd)
 	case "bash":
 		return withBundledBash(cmd, bashRC)
+	case "pwsh", "powershell":
+		return withBundledPowerShell(cmd, psProfile)
 	default:
 		return withoutOhMyZsh(cmd)
 	}
@@ -90,6 +107,17 @@ func withInteractiveZsh(cmd []string) []string {
 func withBundledBash(cmd []string, rcPath string) []string {
 	args := []string{"--rcfile", rcPath, "--noprofile", "-i"}
 	return append([]string{cmd[0]}, args...)
+}
+
+func withBundledPowerShell(cmd []string, psProfile string) []string {
+	if psProfile != "" {
+		return []string{
+			cmd[0], "-NoLogo", "-NoExit",
+			"-ExecutionPolicy", "Bypass",
+			"-File", psProfile,
+		}
+	}
+	return append([]string{cmd[0], "-NoLogo", "-NoExit"}, cmd[1:]...)
 }
 
 func withoutOhMyZsh(cmd []string) []string {
@@ -113,7 +141,7 @@ func shellBase(shellPath string) string {
 	if i := strings.LastIndex(base, "-"); i >= 0 {
 		base = base[i+1:]
 	}
-	return base
+	return strings.TrimSuffix(strings.ToLower(base), ".exe")
 }
 
 func hasArg(args []string, flag string) bool {

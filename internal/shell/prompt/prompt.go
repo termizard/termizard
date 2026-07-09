@@ -14,7 +14,7 @@ const (
 	StyleNone = "none"
 )
 
-//go:embed embed/zsh/.zshrc embed/kali-prompt.zsh embed/bash/bashrc
+//go:embed embed/zsh/.zshrc embed/kali-prompt.zsh embed/bash/bashrc embed/powershell/profile.ps1
 var embedded embed.FS
 
 // Materialize writes bundled prompt files to the user cache dir.
@@ -40,6 +40,19 @@ func Materialize() (zshDir, bashRC string, err error) {
 	return zshDir, bashRC, nil
 }
 
+// PowerShellProfilePath returns the materialized PowerShell prompt script path.
+func PowerShellProfilePath() (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("prompt: cache dir: %w", err)
+	}
+	dst := filepath.Join(base, "termizard", "prompt", "powershell", "profile.ps1")
+	if err := writeEmbedded("embed/powershell/profile.ps1", dst); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
 // ApplyEnv adds environment variables needed for the bundled prompt style.
 func ApplyEnv(base []string, shellPath, style string) ([]string, error) {
 	if style == "" {
@@ -62,6 +75,12 @@ func ApplyEnv(base []string, shellPath, style string) ([]string, error) {
 		return setEnv(base, "ZDOTDIR", zshDir), nil
 	case "bash":
 		return setEnv(base, "TERMIZARD_BASH_RC", bashRC), nil
+	case "pwsh", "powershell":
+		psProfile, err := PowerShellProfilePath()
+		if err != nil {
+			return base, err
+		}
+		return setEnv(base, "TERMIZARD_PS_PROFILE", psProfile), nil
 	default:
 		return base, nil
 	}
@@ -72,7 +91,7 @@ func shellBase(shellPath string) string {
 	if i := strings.LastIndex(base, "-"); i >= 0 {
 		base = base[i+1:]
 	}
-	return base
+	return strings.TrimSuffix(strings.ToLower(base), ".exe")
 }
 
 func setEnv(env []string, key, value string) []string {

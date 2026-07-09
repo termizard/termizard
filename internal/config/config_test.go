@@ -259,6 +259,7 @@ func TestLoadTabsConfig(t *testing.T) {
 [tabs]
 enabled = true
 label = "index"
+size = "full"
 show_new_button = false
 show_when_single = true
 `
@@ -274,6 +275,9 @@ show_when_single = true
 	}
 	if cfg.Tabs.Label != config.TabLabelIndex {
 		t.Fatalf("label = %q, want index", cfg.Tabs.Label)
+	}
+	if cfg.Tabs.Size != config.TabSizeFull {
+		t.Fatalf("size = %q, want full", cfg.Tabs.Size)
 	}
 	if cfg.Tabs.ShowNewButton {
 		t.Fatal("expected show_new_button false")

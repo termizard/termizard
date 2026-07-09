@@ -58,3 +58,19 @@ func TestApplyEnvNoneIsNoop(t *testing.T) {
 		t.Fatalf("env changed: %v", env)
 	}
 }
+
+func TestApplyEnvPowerShellSetsProfile(t *testing.T) {
+	env, err := prompt.ApplyEnv([]string{"HOME=/tmp"}, "pwsh.exe", prompt.StyleKali)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "TERMIZARD_PS_PROFILE=") && strings.TrimPrefix(kv, "TERMIZARD_PS_PROFILE=") != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected TERMIZARD_PS_PROFILE, got %v", env)
+	}
+}

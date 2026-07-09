@@ -2,12 +2,9 @@
 package app
 
 import (
-	"sync"
-
 	"github.com/termizard/termizard/internal/adapter"
 	"github.com/termizard/termizard/internal/config"
 	"github.com/termizard/termizard/internal/core/pty"
-	"github.com/termizard/termizard/internal/ui/wails"
 	"github.com/termizard/termizard/internal/util/logger"
 )
 
@@ -17,66 +14,45 @@ type App struct {
 	ui  adapter.UI
 }
 
-// New creates an App. The PTY is opened when the frontend reports its grid size
-// via Ready(), so the shell is not resized before the first prompt is drawn.
-func New(cfg *config.Config) (*App, error) {
-	ui := wails.New(cfg)
+// surfaceReadyUI can defer PTY start until the GPU surface exists.
+type surfaceReadyUI interface {
+	adapter.UI
+	OnSurfaceReady(fn func())
+}
 
-	var (
-		mu sync.Mutex
-		p  pty.PTY
-	)
+// New creates an App using the provided UI backend.
+// The PTY is opened with the configured initial dimensions and connected to ui.
+func New(cfg *config.Config, ui adapter.UI) (*App, error) {
+	cols := cfg.Terminal.InitialCols
+	rows := cfg.Terminal.InitialRows
+	if cols < 1 {
+		cols = 80
+	}
+	if rows < 1 {
+		rows = 24
+	}
+	c, r := pty.ClampSize(cols, rows)
+	p, err := pty.Open(pty.Config{
+		Command: cfg.ShellCommand(),
+		Cols:    c,
+		Rows:    r,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	ui.OnKeyInput(func(e adapter.KeyEvent) {
-		mu.Lock()
-		ptyInst := p
-		mu.Unlock()
-		if ptyInst != nil {
-			_, _ = ptyInst.Write(e.Data)
-		}
+		_, _ = p.Write(e.Data)
 	})
-
 	ui.OnResize(func(e adapter.ResizeEvent) {
-		mu.Lock()
-		ptyInst := p
-		mu.Unlock()
-		if ptyInst != nil {
-			_ = ptyInst.Resize(e.Cols, e.Rows)
-		}
+		_ = p.Resize(e.Cols, e.Rows)
 	})
 
-	ui.SetPTYStarter(func(cols, rows int) error {
-		mu.Lock()
-		defer mu.Unlock()
-		if p != nil {
-			return nil
-		}
-		if cols < 1 {
-			cols = 80
-		}
-		if rows < 1 {
-			rows = 24
-		}
-		c, r := pty.ClampSize(cols, rows)
-		env, err := cfg.ShellEnvironment(nil)
-		if err != nil {
-			logger.Get().Warn("shell env setup failed", "err", err)
-			env = nil
-		}
-		np, err := pty.Open(pty.Config{
-			Command: cfg.ShellCommand(),
-			Cols:    c,
-			Rows:    r,
-			Env:     env,
-		})
-		if err != nil {
-			return err
-		}
-		p = np
-		startPTYLoops(ui, np)
-		return nil
-	})
-
+	if sru, ok := ui.(surfaceReadyUI); ok {
+		sru.OnSurfaceReady(func() { startPTYLoops(ui, p) })
+	} else {
+		startPTYLoops(ui, p)
+	}
 	return &App{cfg: cfg, ui: ui}, nil
 }
 

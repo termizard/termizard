@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -186,6 +187,9 @@ func TestShellCommandZshRemovesFFlagForBundledKali(t *testing.T) {
 }
 
 func TestShellEnvironmentUsesEnvShellProgram(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows ignores $SHELL; use [shell].program in config")
+	}
 	t.Setenv("SHELL", "/bin/bash")
 	cfg := config.Defaults()
 	cfg.Shell.Program = ""

@@ -29,7 +29,6 @@ type windowsPTY struct {
 	rPipe    *os.File
 	wPipe    *os.File
 	proc     windows.Handle
-	thread   windows.Handle
 	pid      uint32
 	attrList *windows.ProcThreadAttributeListContainer
 	once     sync.Once
@@ -120,7 +119,13 @@ func Open(cfg Config) (PTY, error) {
 	}
 
 	var procInfo windows.ProcessInformation
-	creationFlags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT)
+	creationFlags := uint32(
+		windows.EXTENDED_STARTUPINFO_PRESENT |
+			windows.CREATE_UNICODE_ENVIRONMENT |
+			windows.CREATE_NO_WINDOW,
+	)
+	// lpApplicationName must be nil for ConPTY — passing the image path breaks
+	// pseudoconsole attachment while the child process still appears to start.
 	if err := windows.CreateProcess(
 		nil, cmdLine, nil, nil, false,
 		creationFlags, envBlock, dirUTF16,
@@ -135,8 +140,16 @@ func Open(cfg Config) (PTY, error) {
 	}
 	windows.CloseHandle(procInfo.Thread)
 
+	if err := windows.ResizePseudoConsole(hPC, coord); err != nil {
+		logger.Get().Warn("pty initial resize failed",
+			slog.Uint64("pid", uint64(procInfo.ProcessId)),
+			slog.String("err", err.Error()),
+		)
+	}
+
 	logger.Get().Info("pty opened",
 		slog.String("cmd", command[0]),
+		slog.String("argv", makeCmdLine(command)),
 		slog.Uint64("pid", uint64(procInfo.ProcessId)),
 		slog.Uint64("cols", uint64(cfg.Cols)),
 		slog.Uint64("rows", uint64(cfg.Rows)),
@@ -147,7 +160,6 @@ func Open(cfg Config) (PTY, error) {
 		rPipe:    os.NewFile(uintptr(childOutRead), "pty-out"),
 		wPipe:    os.NewFile(uintptr(childInWrite), "pty-in"),
 		proc:     procInfo.Process,
-		thread:   windows.InvalidHandle,
 		pid:      procInfo.ProcessId,
 		attrList: attrList,
 	}, nil
@@ -177,7 +189,15 @@ func (p *windowsPTY) Resize(cols, rows uint16) error {
 
 func (p *windowsPTY) Wait() error {
 	_, err := windows.WaitForSingleObject(p.proc, windows.INFINITE)
-	logger.Get().Info("pty child exited", slog.Uint64("pid", uint64(p.pid)))
+	var code uint32
+	if codeErr := windows.GetExitCodeProcess(p.proc, &code); codeErr != nil {
+		logger.Get().Info("pty child exited", slog.Uint64("pid", uint64(p.pid)))
+	} else {
+		logger.Get().Info("pty child exited",
+			slog.Uint64("pid", uint64(p.pid)),
+			slog.Uint64("exit_code", uint64(code)),
+		)
+	}
 	return err
 }
 
@@ -209,7 +229,7 @@ func resolveCommand(cmd []string) ([]string, error) {
 	if len(cmd) > 0 {
 		return normalizeWindowsCommand(cmd), nil
 	}
-	return []string{windowsDefaultShell()}, nil
+	return windowsDefaultCommand(), nil
 }
 
 func resolveDir(dir string) (string, error) {
@@ -271,6 +291,16 @@ func makeEnvBlock(env []string) (*uint16, error) {
 	if len(env) == 0 {
 		return nil, nil
 	}
-	block := strings.Join(env, "\x00") + "\x00\x00"
-	return windows.UTF16PtrFromString(block)
+	// Windows env blocks are UTF-16 key=value pairs separated by NUL bytes,
+	// terminated by a double NUL. UTF16PtrFromString rejects embedded NULs.
+	block := make([]uint16, 0, 256)
+	for _, kv := range env {
+		u16, err := windows.UTF16FromString(kv)
+		if err != nil {
+			return nil, fmt.Errorf("pty: encode env entry %q: %w", kv, err)
+		}
+		block = append(block, u16...)
+	}
+	block = append(block, 0)
+	return &block[0], nil
 }

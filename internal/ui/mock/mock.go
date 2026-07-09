@@ -67,6 +67,9 @@ func (m *Mock) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
+// NotifyShellError is a no-op in tests.
+func (m *Mock) NotifyShellError(_ int, _ error) {}
+
 // SimulateKey injects a synthetic key event, as if the user typed data.
 func (m *Mock) SimulateKey(data []byte) {
 	m.mu.Lock()

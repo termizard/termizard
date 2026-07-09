@@ -1,14 +1,10 @@
 name: CI
 
 # CI Strategy:
-# - Core library tests run on Linux, macOS, and Windows (CGO_ENABLED=0, no Wails)
-# - Application build requires embedded frontend dist + CGO on Unix (Wails v3)
-# - Go 1.26+ required (matches go.mod requirement)
-#
-# Branch Strategy (GitHub Flow):
-# - main branch: Production-ready code
-# - Feature branches: Tested via pull_request trigger
-# - Pull requests: Must pass all checks before merge
+# - Pure Go builds: CGO_ENABLED=0 works on all platforms (no WebView2, no GTK/WebKit).
+# - Tests run with race detector on Linux/macOS; race detector is unavailable on
+#   Windows, so CGO_ENABLED=0 is used there without -race.
+# - Go 1.26+ required (matches go.mod).
 
 on:
   push:
@@ -24,111 +20,63 @@ permissions:
   id-token: write  # Required for Codecov OIDC token
 
 env:
+  GO_VERSION: '1.26'
   GO_PACKAGES: ./cmd/... ./internal/...
-  # Wails UI needs embedded frontend + CGO; covered by build/lint jobs.
-  GO_CORE_PACKAGES: ./internal/adapter/... ./internal/config/... ./internal/core/... ./internal/ui/mock/... ./internal/util/...
-  NODE_VERSION: '24'
 
 jobs:
   build:
-    name: Build - ${{ matrix.os }}
+    name: Build — ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.26']
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/setup-go@v5
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+    - name: Download and verify dependencies
+      run: go mod download && go mod verify
 
-    - name: Build frontend
-      run: |
-        cd frontend
-        npm ci
-        npm run build
-
-    - name: Install Linux GUI build dependencies
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
-
-    - name: Download dependencies
-      run: go mod download
-
-    - name: Verify dependencies
-      run: go mod verify
-
-    - name: Build application
+    - name: Build
       shell: bash
       run: |
-        OUT=termizard
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then OUT=termizard.exe; fi
-        go build -tags production -o "$OUT" ./cmd/termizard
-      env:
-        CGO_ENABLED: ${{ matrix.os == 'windows-latest' && '0' || '1' }}
+        EXT=""
+        [ "${{ matrix.os }}" = "windows-latest" ] && EXT=".exe"
+        CGO_ENABLED=0 go build -tags production -trimpath \
+          -ldflags="-w -s" \
+          -o "termizard${EXT}" ./cmd/termizard
 
   test:
-    name: Test - ${{ matrix.os }}
+    name: Test — ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.26']
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/setup-go@v5
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version: ${{ env.GO_VERSION }}
         cache: true
-
-    - name: Download dependencies
-      run: go mod download
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      run: go vet ${{ env.GO_CORE_PACKAGES }}
-      env:
-        CGO_ENABLED: "0"
+      run: CGO_ENABLED=0 go vet ${{ env.GO_PACKAGES }}
 
-    - name: Run tests with race detector
+    - name: Test
       shell: bash
       run: |
-        FLAGS="-parallel 1 -coverprofile=coverage.txt -covermode=atomic"
-        PKGS="${{ env.GO_CORE_PACKAGES }}"
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          CGO_ENABLED=0 go test $FLAGS $PKGS
+          CGO_ENABLED=0 go test -parallel 4 -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }}
         else
-          CGO_ENABLED=1 go test -race $FLAGS $PKGS
-        fi
-
-    - name: Verify coverage file
-      if: matrix.os == 'ubuntu-latest'
-      shell: bash
-      run: |
-        if [ -f coverage.txt ]; then
-          echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
-        else
-          echo "coverage.txt not found, generating separately..."
-          CGO_ENABLED=0 go test -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_CORE_PACKAGES }} || true
+          CGO_ENABLED=0 go test -race -parallel 4 -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }}
         fi
 
     - name: Upload coverage to Codecov
@@ -146,58 +94,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
+        go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
-
-    - name: Build frontend
-      run: |
-        cd frontend
-        npm ci
-        npm run build
-
-    - name: Install Linux GUI build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
-
-    - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v8
+    - uses: golangci/golangci-lint-action@v8
       with:
         version: latest
-        args: --timeout=5m ./cmd/... ./internal/...
+        args: --timeout=5m ${{ env.GO_PACKAGES }}
       env:
-        CGO_ENABLED: "1"
+        CGO_ENABLED: "0"
 
   formatting:
     name: Formatting
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
+        go-version: ${{ env.GO_VERSION }}
         cache: true
 
     - name: Check formatting
       run: |
-        UNFORMATTED=$(gofmt -l $(go list -f '{{.Dir}}' ./cmd/... ./internal/... | sort -u))
+        UNFORMATTED=$(gofmt -l $(go list -f '{{.Dir}}' ${{ env.GO_PACKAGES }} | sort -u))
         if [ -n "$UNFORMATTED" ]; then
           echo "ERROR: The following files are not formatted:"
           echo "$UNFORMATTED"
@@ -212,13 +137,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    - uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
+        go-version: ${{ env.GO_VERSION }}
         cache: true
 
     - name: Install go-mod-outdated

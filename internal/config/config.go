@@ -17,6 +17,9 @@ const (
 
 	TabLabelPath  = "path"
 	TabLabelIndex = "index"
+
+	TabSizeFull    = "full"    // stretch tabs across the bar (flex:1)
+	TabSizeCompact = "compact" // fixed-width slots (~140px), like JetBrains
 )
 
 // Config holds all user-configurable terminal settings.
@@ -48,6 +51,7 @@ type WindowConfig struct {
 type TabsConfig struct {
 	Enabled        bool
 	Label          string `toml:"label"` // path | index
+	Size           string `toml:"size"`  // full | compact
 	ShowNewButton  bool   `toml:"show_new_button"`
 	ShowWhenSingle bool   `toml:"show_when_single"`
 }
@@ -163,6 +167,7 @@ func Load(path string) (*Config, error) {
 func normalize(cfg *Config) {
 	cfg.Window.TitlePosition = normalizeTitlePosition(cfg.Window.TitlePosition)
 	cfg.Tabs.Label = normalizeTabLabel(cfg.Tabs.Label)
+	cfg.Tabs.Size = normalizeTabSize(cfg.Tabs.Size)
 }
 
 func normalizeTitlePosition(v string) string {
@@ -180,6 +185,15 @@ func normalizeTabLabel(v string) string {
 		return strings.ToLower(strings.TrimSpace(v))
 	default:
 		return TabLabelPath
+	}
+}
+
+func normalizeTabSize(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case TabSizeFull, TabSizeCompact:
+		return strings.ToLower(strings.TrimSpace(v))
+	default:
+		return TabSizeCompact
 	}
 }
 

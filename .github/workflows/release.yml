@@ -10,8 +10,6 @@ permissions:
 
 env:
   GO_VERSION: '1.26'
-  NODE_VERSION: '24'
-  WAILS_VERSION: v3.0.0-alpha2.112
 
 jobs:
   build-macos-arm64:
@@ -27,18 +25,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+      - name: Install task runner
+        run: go install github.com/go-task/task/v3/cmd/task@latest
 
-      - name: Install build tools
-        run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
-          go install github.com/go-task/task/v3/cmd/task@latest
-
-      - name: Sync release version and build assets
+      - name: Sync release version
         run: bash scripts/sync-release-version.sh
         env:
           VERSION: ${{ github.event.release.tag_name || github.ref_name }}
@@ -46,8 +36,7 @@ jobs:
       - name: Build DMG installer
         run: task darwin:package ARCH=arm64
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: termizard-macos-arm64
           path: |
@@ -67,18 +56,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+      - name: Install task runner
+        run: go install github.com/go-task/task/v3/cmd/task@latest
 
-      - name: Install build tools
-        run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
-          go install github.com/go-task/task/v3/cmd/task@latest
-
-      - name: Sync release version and build assets
+      - name: Sync release version
         run: bash scripts/sync-release-version.sh
         env:
           VERSION: ${{ github.event.release.tag_name || github.ref_name }}
@@ -86,8 +67,7 @@ jobs:
       - name: Build DMG installer
         run: task darwin:package ARCH=amd64
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: termizard-macos-amd64
           path: |
@@ -106,12 +86,6 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Install NSIS
         shell: pwsh
@@ -135,13 +109,11 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $nsisDir
           & "$nsisDir\makensis.exe" /VERSION
 
-      - name: Install build tools
+      - name: Install task runner
         shell: bash
-        run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
-          go install github.com/go-task/task/v3/cmd/task@latest
+        run: go install github.com/go-task/task/v3/cmd/task@latest
 
-      - name: Sync release version and build assets
+      - name: Sync release version
         shell: bash
         run: bash scripts/sync-release-version.sh
         env:
@@ -149,25 +121,9 @@ jobs:
 
       - name: Build universal NSIS installer (amd64 + arm64)
         shell: pwsh
-        run: |
-          $nsisCandidates = @(
-            "${env:ProgramFiles(x86)}\NSIS",
-            "$env:ProgramFiles\NSIS"
-          )
-          foreach ($dir in $nsisCandidates) {
-            if (Test-Path "$dir\makensis.exe") {
-              $env:Path = "$dir;$env:Path"
-              break
-            }
-          }
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            throw "makensis not found in PATH"
-          }
-          makensis /VERSION
-          task windows:package:universal INSTALL_SCOPE=user
+        run: task windows:package:universal INSTALL_SCOPE=user
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: termizard-windows-universal
           path: bin/termizard-amd64_arm64-installer.exe
@@ -185,41 +141,24 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            gcc pkg-config \
-            libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: Install task runner
+        run: go install github.com/go-task/task/v3/cmd/task@latest
 
-      - name: Install build tools
-        run: |
-          go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_VERSION }}
-          go install github.com/go-task/task/v3/cmd/task@latest
-
-      - name: Sync release version and build assets
+      - name: Sync release version
         run: bash scripts/sync-release-version.sh
         env:
           VERSION: ${{ github.event.release.tag_name || github.ref_name }}
 
-      - name: Build installers (menu + desktop shortcuts)
-        run: |
-          task linux:create:deb ARCH=amd64
-          task linux:create:appimage ARCH=amd64
+      - name: Build .deb package
+        run: task linux:create:deb ARCH=amd64
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: termizard-linux-amd64
-          path: |
-            bin/*.deb
-            bin/*.AppImage
+          path: bin/*.deb
 
   publish:
     name: Publish release assets

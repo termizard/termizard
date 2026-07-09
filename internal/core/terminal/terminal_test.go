@@ -71,6 +71,41 @@ func TestAutoWrap(t *testing.T) {
 	}
 }
 
+// Soft-wrap on the last row must keep the previous (prompt) row in the grid
+// after the scroll — Kitty keeps "→ ~ ппп…" visible while the continuation
+// continues on the next line.
+func TestSoftWrapAtBottomPreservesPreviousRow(t *testing.T) {
+	const cols, rows = 8, 3
+	term := newTerm(cols, rows)
+	feed(t, term, "\x1b[2J\x1b[H")
+	feed(t, term, ">prompt\r\n") // row 0
+	feed(t, term, "aaaaaaaZ")    // 8 chars → fill last display row (row 1), pending wrap
+	// Move to bottom then fill it.
+	feed(t, term, "\r\n") // row 2
+	before := term.ScrollGen()
+	feed(t, term, strings.Repeat("n", cols)+"X") // fill bottom + wrap → scroll
+	after := term.ScrollGen()
+	if after <= before {
+		t.Fatalf("ScrollGen did not advance on bottom soft-wrap: %d → %d", before, after)
+	}
+	// After scroll, the previous filled line of 'n' must still be on screen
+	// (shifted up) so the start of the input isn't "hidden".
+	line := make([]rune, 0, cols)
+	for c := 0; c < cols; c++ {
+		line = append(line, cellAt(t, term, rows-2, c).Char)
+	}
+	got := string(line)
+	if !strings.Contains(got, "nnnn") {
+		t.Fatalf("continuation of wrapped input missing after scroll: %q", got)
+	}
+	if cellAt(t, term, rows-1, 0).Char != 'X' {
+		t.Fatalf("want 'X' at bottom-left after wrap, got %q", cellAt(t, term, rows-1, 0).Char)
+	}
+	if !term.IsDirty(0) || !term.IsDirty(1) || !term.IsDirty(2) {
+		t.Fatal("all rows must be dirty after scroll so UI repaints the prompt line")
+	}
+}
+
 // ── SGR ───────────────────────────────────────────────────────────────────────
 
 func TestSGRBoldColor(t *testing.T) {
