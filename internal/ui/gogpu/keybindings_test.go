@@ -211,7 +211,10 @@ func TestStringToKeySpecialChars(t *testing.T) {
 }
 
 func TestStringToKeyArrows(t *testing.T) {
-	cases := []struct{ s string; want gpucontext.Key }{
+	cases := []struct {
+		s    string
+		want gpucontext.Key
+	}{
 		{"up", gpucontext.KeyUp},
 		{"ArrowUp", gpucontext.KeyUp},
 		{"down", gpucontext.KeyDown},
@@ -230,7 +233,10 @@ func TestStringToKeyArrows(t *testing.T) {
 }
 
 func TestStringToKeyNavigation(t *testing.T) {
-	cases := []struct{ s string; want gpucontext.Key }{
+	cases := []struct {
+		s    string
+		want gpucontext.Key
+	}{
 		{"home", gpucontext.KeyHome},
 		{"end", gpucontext.KeyEnd},
 		{"pageup", gpucontext.KeyPageUp},
@@ -254,7 +260,10 @@ func TestStringToKeyNavigation(t *testing.T) {
 }
 
 func TestStringToKeyFKeys(t *testing.T) {
-	cases := []struct{ s string; want gpucontext.Key }{
+	cases := []struct {
+		s    string
+		want gpucontext.Key
+	}{
 		{"f1", gpucontext.KeyF1},
 		{"f6", gpucontext.KeyF6},
 		{"f12", gpucontext.KeyF12},
