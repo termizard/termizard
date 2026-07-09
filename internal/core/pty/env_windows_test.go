@@ -4,6 +4,7 @@ package pty
 
 import (
 	"testing"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -22,16 +23,18 @@ func TestMakeEnvBlockMultipleEntries(t *testing.T) {
 	}
 
 	// Walk the UTF-16 block: each entry is NUL-terminated, block ends with double NUL.
+	// makeEnvBlock returns *uint16 (a Windows LPWSTR); use unsafe.Slice to index it.
+	raw := unsafe.Slice(block, 4096)
 	var entries []string
 	start := 0
 	for i := 0; i < 4096; i++ {
-		if block[i] == 0 {
+		if raw[i] == 0 {
 			if i == start {
 				break
 			}
-			entries = append(entries, windows.UTF16ToString(block[start:i]))
+			entries = append(entries, windows.UTF16ToString(raw[start:i]))
 			start = i + 1
-			if block[start] == 0 {
+			if raw[start] == 0 {
 				break
 			}
 		}

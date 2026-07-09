@@ -111,6 +111,9 @@ func TestShellCommandUsesDefaultShell(t *testing.T) {
 }
 
 func TestShellCommandUsesEnvShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("$SHELL is ignored on Windows; native shell detection is used instead")
+	}
 	t.Setenv("SHELL", "/bin/fish")
 	cfg := config.Defaults()
 	cfg.Shell.Program = ""
