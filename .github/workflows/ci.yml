@@ -1,9 +1,8 @@
 name: CI
 
 # CI Strategy:
-# - Pure Go builds: CGO_ENABLED=0 works on all platforms (no WebView2, no GTK/WebKit).
-# - Tests run with race detector on Linux/macOS; race detector is unavailable on
-#   Windows, so CGO_ENABLED=0 is used there without -race.
+# - Pure Go builds: CGO_ENABLED=0 on all platforms (no WebView2, no GTK/WebKit).
+# - Race detector requires CGO, so tests run without -race everywhere.
 # - Go 1.26+ required (matches go.mod).
 
 on:
@@ -72,12 +71,7 @@ jobs:
 
     - name: Test
       shell: bash
-      run: |
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          CGO_ENABLED=0 go test -parallel 4 -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }}
-        else
-          CGO_ENABLED=0 go test -race -parallel 4 -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }}
-        fi
+      run: CGO_ENABLED=0 go test -parallel 4 -coverprofile=coverage.txt -covermode=atomic ${{ env.GO_PACKAGES }}
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
