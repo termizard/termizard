@@ -56,9 +56,15 @@ func keyToCtrl(key gpucontext.Key) (byte, bool) {
 	return 0, false
 }
 
+// Escape sequences that appear in both specialSeqs and tests.
+const (
+	seqCursorUp = "\x1b[A"
+	seqF1Str    = "\x1bOP"
+)
+
 // specialSeqs maps non-printable keys to their ANSI/xterm escape sequences.
 var specialSeqs = map[gpucontext.Key]string{
-	gpucontext.KeyUp:        "\x1b[A",
+	gpucontext.KeyUp:        seqCursorUp,
 	gpucontext.KeyDown:      "\x1b[B",
 	gpucontext.KeyRight:     "\x1b[C",
 	gpucontext.KeyLeft:      "\x1b[D",
@@ -68,7 +74,7 @@ var specialSeqs = map[gpucontext.Key]string{
 	gpucontext.KeyPageDown:  "\x1b[6~",
 	gpucontext.KeyInsert:    "\x1b[2~",
 	gpucontext.KeyDelete:    "\x1b[3~",
-	gpucontext.KeyF1:        "\x1bOP",
+	gpucontext.KeyF1:        seqF1Str,
 	gpucontext.KeyF2:        "\x1bOQ",
 	gpucontext.KeyF3:        "\x1bOR",
 	gpucontext.KeyF4:        "\x1bOS",

@@ -219,9 +219,9 @@ func TestStringToKeyArrows(t *testing.T) {
 		{"ArrowUp", gpucontext.KeyUp},
 		{"down", gpucontext.KeyDown},
 		{"ArrowDown", gpucontext.KeyDown},
-		{"left", gpucontext.KeyLeft},
+		{keyDirLeft, gpucontext.KeyLeft},
 		{"ArrowLeft", gpucontext.KeyLeft},
-		{"right", gpucontext.KeyRight},
+		{keyDirRight, gpucontext.KeyRight},
 		{"ArrowRight", gpucontext.KeyRight},
 	}
 	for _, tc := range cases {
@@ -293,28 +293,28 @@ func TestStringToKeyEmptyString(t *testing.T) {
 // modsFromStrings
 
 func TestModsFromStringsCtrl(t *testing.T) {
-	m := modsFromStrings([]string{"ctrl"})
+	m := modsFromStrings([]string{modCtrl})
 	if m&gpucontext.ModControl == 0 {
 		t.Fatal("ctrl not set")
 	}
 }
 
 func TestModsFromStringsControlAlias(t *testing.T) {
-	m := modsFromStrings([]string{"control"})
+	m := modsFromStrings([]string{modControl})
 	if m&gpucontext.ModControl == 0 {
 		t.Fatal("control alias not set")
 	}
 }
 
 func TestModsFromStringsShift(t *testing.T) {
-	m := modsFromStrings([]string{"shift"})
+	m := modsFromStrings([]string{modShift})
 	if m&gpucontext.ModShift == 0 {
 		t.Fatal("shift not set")
 	}
 }
 
 func TestModsFromStringsAlt(t *testing.T) {
-	for _, name := range []string{"alt", "option"} {
+	for _, name := range []string{modAlt, modOption} {
 		m := modsFromStrings([]string{name})
 		if m&gpucontext.ModAlt == 0 {
 			t.Fatalf("alt alias %q not set", name)
@@ -323,7 +323,7 @@ func TestModsFromStringsAlt(t *testing.T) {
 }
 
 func TestModsFromStringsMeta(t *testing.T) {
-	for _, name := range []string{"meta", "cmd", "super"} {
+	for _, name := range []string{modMeta, modCmd, modSuper} {
 		m := modsFromStrings([]string{name})
 		if m&gpucontext.ModSuper == 0 {
 			t.Fatalf("super alias %q not set", name)
@@ -332,7 +332,7 @@ func TestModsFromStringsMeta(t *testing.T) {
 }
 
 func TestModsFromStringsMultiple(t *testing.T) {
-	m := modsFromStrings([]string{"ctrl", "shift", "alt"})
+	m := modsFromStrings([]string{modCtrl, modShift, modAlt})
 	if m&gpucontext.ModControl == 0 || m&gpucontext.ModShift == 0 || m&gpucontext.ModAlt == 0 {
 		t.Fatalf("multiple mods not set: %v", m)
 	}
@@ -356,7 +356,7 @@ func TestModsFromStringsEmpty(t *testing.T) {
 
 func TestCompileBindingsValidEntry(t *testing.T) {
 	kbs := []config.Keybinding{
-		{Key: "c", Mods: []string{"ctrl"}, Action: "Copy"},
+		{Key: "c", Mods: []string{modCtrl}, Action: "Copy"},
 	}
 	cbs := compileBindings(kbs)
 	if len(cbs) != 1 {

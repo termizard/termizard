@@ -46,22 +46,8 @@ func TestCloseNoFile(t *testing.T) {
 	logger.Close()
 }
 
-// flushWriter is unexported; test it via an io.Writer that wraps a bytes.Buffer
-// with a no-op Sync so we can verify the write-through behaviour.
-
-type syncBuffer struct {
-	bytes.Buffer
-	synced bool
-}
-
-func (s *syncBuffer) Sync() error {
-	s.synced = true
-	return nil
-}
-
 func TestFlushWriterWritesThrough(t *testing.T) {
-	// Use io.MultiWriter through a plain bytes.Buffer to verify the pattern:
-	// flushWriter wraps an inner Writer and syncs the file after each write.
+	// flushWriter wraps an inner Writer; verify write-through behavior via MultiWriter.
 	var buf bytes.Buffer
 	n, err := io.MultiWriter(&buf).Write([]byte("hello"))
 	if err != nil || n != 5 {

@@ -67,8 +67,8 @@ func TestKeyToCtrlUnknown(t *testing.T) {
 // withAlt
 
 func TestWithAltNone(t *testing.T) {
-	got := withAlt(0, "\x1b[A")
-	if string(got) != "\x1b[A" {
+	got := withAlt(0, seqCursorUp)
+	if string(got) != seqCursorUp {
 		t.Fatalf("no alt: %q", got)
 	}
 }
@@ -105,7 +105,7 @@ func TestKeyToSeqCtrlShiftSkips(t *testing.T) {
 
 func TestKeyToSeqArrowUp(t *testing.T) {
 	got := keyToSeq(gpucontext.KeyUp, 0, false)
-	if string(got) != "\x1b[A" {
+	if string(got) != seqCursorUp {
 		t.Fatalf("Up = %q", got)
 	}
 }
@@ -119,7 +119,7 @@ func TestKeyToSeqArrowAlt(t *testing.T) {
 
 func TestKeyToSeqF1(t *testing.T) {
 	got := keyToSeq(gpucontext.KeyF1, 0, false)
-	if string(got) != "\x1bOP" {
+	if string(got) != seqF1Str {
 		t.Fatalf("F1 = %q", got)
 	}
 }
@@ -241,7 +241,7 @@ func TestKeyToSeqAppCursorAlt(t *testing.T) {
 // Non-appCursor key that has no appCursor override falls back to specialSeqs.
 func TestKeyToSeqAppCursorF1FallsBack(t *testing.T) {
 	got := keyToSeq(gpucontext.KeyF1, 0, true)
-	if string(got) != "\x1bOP" {
+	if string(got) != seqF1Str {
 		t.Fatalf("appCursor F1 = %q", got)
 	}
 }

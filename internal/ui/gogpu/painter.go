@@ -8,6 +8,7 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/termizard/termizard/internal/config"
 	"github.com/termizard/termizard/internal/core/terminal"
 )
 
@@ -169,7 +170,7 @@ func paintTitleChrome(buf []byte, frameW, titleH int, pal *colorPalette, face fo
 			pad = 8
 		}
 		switch align {
-		case "left":
+		case config.TitleAlignLeft:
 			x = 78 // past traffic lights (logical≈78 in CSS; scale via pad later)
 			if frameW > 200 {
 				x = frameW / 15
@@ -177,7 +178,7 @@ func paintTitleChrome(buf []byte, frameW, titleH int, pal *colorPalette, face fo
 					x = 70
 				}
 			}
-		case "right":
+		case config.TitleAlignRight:
 			x = frameW - w - pad
 		default: // center
 			x = (frameW - w) / 2

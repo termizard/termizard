@@ -7,6 +7,24 @@ import (
 	"github.com/termizard/termizard/internal/config"
 )
 
+// Modifier name strings used in config keybindings.
+const (
+	modCtrl    = "ctrl"
+	modControl = "control"
+	modShift   = "shift"
+	modAlt     = "alt"
+	modOption  = "option"
+	modMeta    = "meta"
+	modCmd     = "cmd"
+	modSuper   = "super"
+)
+
+// Key direction name strings used in stringToKey.
+const (
+	keyDirLeft  = "left"
+	keyDirRight = "right"
+)
+
 // compiledBinding is a pre-processed keybinding ready for O(n) matching.
 type compiledBinding struct {
 	key    gpucontext.Key
@@ -77,13 +95,13 @@ func modsFromStrings(names []string) gpucontext.Modifiers {
 	var m gpucontext.Modifiers
 	for _, n := range names {
 		switch strings.ToLower(n) {
-		case "ctrl", "control":
+		case modCtrl, modControl:
 			m |= gpucontext.ModControl
-		case "shift":
+		case modShift:
 			m |= gpucontext.ModShift
-		case "alt", "option":
+		case modAlt, modOption:
 			m |= gpucontext.ModAlt
-		case "meta", "cmd", "super":
+		case modMeta, modCmd, modSuper:
 			m |= gpucontext.ModSuper
 		}
 	}
@@ -135,9 +153,9 @@ func stringToKey(s string) (gpucontext.Key, bool) {
 		return gpucontext.KeyUp, true
 	case "down", "arrowdown":
 		return gpucontext.KeyDown, true
-	case "left", "arrowleft":
+	case keyDirLeft, "arrowleft":
 		return gpucontext.KeyLeft, true
-	case "right", "arrowright":
+	case keyDirRight, "arrowright":
 		return gpucontext.KeyRight, true
 	case "home":
 		return gpucontext.KeyHome, true

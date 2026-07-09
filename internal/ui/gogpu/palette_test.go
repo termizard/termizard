@@ -140,12 +140,8 @@ func TestParseRGBAColorInvalidPrefix(t *testing.T) {
 }
 
 func TestParseRGBAColorTooFewParts(t *testing.T) {
-	_, ok := parseRGBAColor("rgb(1,2)")
-	if !ok {
-		// 2 parts < 3; expect failure
-	}
-	_ = ok
-	// main assert: must not panic
+	// 2 parts < 3; main assert is no panic
+	_, _ = parseRGBAColor("rgb(1,2)")
 }
 
 func TestParseRGBAColorBadNumber(t *testing.T) {
