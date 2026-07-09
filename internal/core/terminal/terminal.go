@@ -49,6 +49,9 @@ type Terminal struct {
 	// LF at bottom, CSI S, …). The UI uses this to force a full framebuffer
 	// repaint so scrolled rows never leave stale pixels.
 	scrollGen uint64
+	// repaintGen increments on full-screen erase (ED 2/3). The UI sends SIGWINCH
+	// so tmux and similar programs redraw status bars after a clear.
+	repaintGen uint64
 }
 
 // compile-time check: Terminal implements vte.Performer.
@@ -123,6 +126,13 @@ func (t *Terminal) ScrollGen() uint64 {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.scrollGen
+}
+
+// RepaintGen returns a monotonic counter bumped on full-screen erase (ED 2/3).
+func (t *Terminal) RepaintGen() uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.repaintGen
 }
 
 // CursorPos returns the cursor's (col, row) in the active screen.
@@ -610,13 +620,17 @@ func (t *Terminal) eraseDisplay(s *screen, mode int) {
 		s.grid.clearLine(row, 0, col)
 	case 2: // erase entire screen
 		for r := 0; r < s.rows(); r++ {
-			s.grid.clearLine(r, 0, s.cols()-1)
+			s.grid.clearLineFull(r)
 		}
+		t.scrollGen++
+		t.repaintGen++
 	case 3: // erase screen + scrollback (xterm extension)
 		for r := 0; r < s.rows(); r++ {
-			s.grid.clearLine(r, 0, s.cols()-1)
+			s.grid.clearLineFull(r)
 		}
 		t.scrollback = newScrollback(t.scrollback.cap)
+		t.scrollGen++
+		t.repaintGen++
 	}
 }
 

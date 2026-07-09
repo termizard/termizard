@@ -77,12 +77,17 @@ func (cfg *Config) usesBundledPrompt() bool {
 	return false
 }
 
+const (
+	shellZsh = "zsh"
+	psNoLogo = "-NoLogo"
+)
+
 func withBundledShell(cmd []string, bashRC, psProfile string) []string {
 	if len(cmd) == 0 {
 		return cmd
 	}
 	switch shellBase(cmd[0]) {
-	case "zsh":
+	case shellZsh:
 		return withInteractiveZsh(cmd)
 	case "bash":
 		return withBundledBash(cmd, bashRC)
@@ -112,19 +117,19 @@ func withBundledBash(cmd []string, rcPath string) []string {
 func withBundledPowerShell(cmd []string, psProfile string) []string {
 	if psProfile != "" {
 		return []string{
-			cmd[0], "-NoLogo", "-NoExit",
+			cmd[0], psNoLogo, "-NoExit",
 			"-ExecutionPolicy", "Bypass",
 			"-File", psProfile,
 		}
 	}
-	return append([]string{cmd[0], "-NoLogo", "-NoExit"}, cmd[1:]...)
+	return append([]string{cmd[0], psNoLogo, "-NoExit"}, cmd[1:]...)
 }
 
 func withoutOhMyZsh(cmd []string) []string {
 	if len(cmd) == 0 {
 		return cmd
 	}
-	if shellBase(cmd[0]) != "zsh" {
+	if shellBase(cmd[0]) != shellZsh {
 		return cmd
 	}
 	for _, arg := range cmd[1:] {

@@ -1,6 +1,7 @@
 package gogpu
 
 import (
+	"fmt"
 	"image/color"
 	"testing"
 
@@ -160,9 +161,9 @@ func TestMin3ThirdSmallest(t *testing.T) {
 
 func TestChromeAtXYTopLeft(t *testing.T) {
 	c := chromeAtXY(0, 0, 100, 100)
-	// t=0 → blends toward chromeGreen
-	if c.G < c.B {
-		t.Fatalf("top-left should lean green: %v", c)
+	// t=0 → chromeGreen end of the gradient.
+	if c.R == chromeGray.R && c.G == chromeGray.G && c.B == chromeGray.B {
+		t.Fatalf("top-left should be green end, got gray: %v", c)
 	}
 }
 
@@ -342,17 +343,160 @@ func TestChromePanelWithPalette(t *testing.T) {
 func TestApplyEdgeChromePanicsNot(t *testing.T) {
 	buf := make([]byte, 200*200*4)
 	pal := newColorPalette(&config.Config{})
-	applyEdgeChrome(buf, 200, 200, 10, 30, 190, 170, 0, &pal)
+	applyEdgeChrome(buf, 200, 200, 10, 30, 190, 170, 0, 0, &pal)
 }
 
 func TestApplyEdgeChromeTooSmallBuf(t *testing.T) {
 	buf := make([]byte, 4) // too small for 10×10
 	pal := newColorPalette(&config.Config{})
-	applyEdgeChrome(buf, 10, 10, 0, 0, 10, 10, 0, &pal) // must not panic
+	applyEdgeChrome(buf, 10, 10, 0, 0, 10, 10, 0, 0, &pal) // must not panic
 }
 
 func TestApplyEdgeChromeBandsNoPanic(t *testing.T) {
 	buf := make([]byte, 200*200*4)
 	pal := newColorPalette(&config.Config{})
 	applyEdgeChromeBands(buf, 200, 200, 30, 170, 0, &pal)
+}
+
+func TestMaskInnerRoundedCorners(t *testing.T) {
+	const fw, fh = 100, 100
+	buf := make([]byte, fw*fh*4)
+	bg := color.RGBA{R: 10, G: 10, B: 10, A: 255}
+	fillRect(buf, fw, 20, 20, 80, 80, bg)
+	featherTerminalCornersAA(buf, fw, fh, 20, 20, 80, 80, 10)
+	off := (20*fw + 20) * 4
+	if buf[off] == bg.R {
+		t.Fatal("corner pixel should be chrome after feather")
+	}
+}
+
+func TestRoundRectCoverage(t *testing.T) {
+	cases := []struct {
+		px, py float64
+		want   float64
+	}{
+		{50, 50, 1},       // center
+		{20.5, 20.5, 0},   // outside TL corner
+		{29.5, 29.5, 1},   // inside TL corner arc
+		{39.5, 21.5, 1},   // top arm between corners
+		{23.5, 21.5, 0.3}, // TL corner cutout fringe
+	}
+	for _, tc := range cases {
+		got := roundRectCoverage(tc.px, tc.py, 20, 20, 80, 80, 10)
+		if got < tc.want-0.15 || got > tc.want+0.15 {
+			t.Fatalf("coverage(%v,%v)=%v want ~%v", tc.px, tc.py, got, tc.want)
+		}
+	}
+}
+
+func TestPaintTitleChromeCentered(t *testing.T) {
+	b := loadFontBundle(14, 2.0)
+	buf := make([]byte, 400*80*4)
+	pal := newColorPalette(config.Defaults())
+	paintTitleChrome(buf, 400, 76, &pal, b.face, "termizard", config.TitleAlignCenter, b.ascent, true)
+	// Corner pixel should be title background (away from painted glyphs).
+	bg := pal.bg
+	off := 0
+	if buf[off] != bg.R || buf[off+1] != bg.G || buf[off+2] != bg.B {
+		t.Fatalf("title bg pixel = %v,%v,%v want %v", buf[off], buf[off+1], buf[off+2], bg)
+	}
+}
+
+func TestPaintTitleChromeLeftAlign(t *testing.T) {
+	b := loadFontBundle(14, 2.0)
+	buf := make([]byte, 800*60*4)
+	pal := newColorPalette(config.Defaults())
+	paintTitleChrome(buf, 800, 60, &pal, b.face, "left", config.TitleAlignLeft, b.ascent, false)
+}
+
+func TestPaintTitleChromeRightAlign(t *testing.T) {
+	b := loadFontBundle(14, 2.0)
+	buf := make([]byte, 800*60*4)
+	pal := newColorPalette(config.Defaults())
+	paintTitleChrome(buf, 800, 60, &pal, b.face, "right", config.TitleAlignRight, b.ascent, false)
+}
+
+func TestPaintHairline(t *testing.T) {
+	buf := make([]byte, 100*20*4)
+	pal := newColorPalette(config.Defaults())
+	paintHairline(buf, 100, 10, 11, &pal, 0.2)
+}
+
+func TestPaintInterBlockGap(t *testing.T) {
+	buf := make([]byte, 200*200*4)
+	paintInterBlockGap(buf, 200, 200, 50, 58)
+}
+
+func TestRenderTabBarActiveAndInactive(t *testing.T) {
+	b := loadFontBundle(14, 2.0)
+	buf := make([]byte, 800*200*4)
+	pal := newColorPalette(config.Defaults())
+	infos := []tabBarInfo{
+		{title: "~"},
+		{title: "termizard"},
+	}
+	renderTabBar(buf, 800, 200, 40, b.cellW, b.cellH, b.ascent, 24, b.face, &pal,
+		infos, 0, 1, tabDragPreview{}, 2.0, "compact", 0, 76)
+}
+
+func TestRenderTerminalGrid(t *testing.T) {
+	b := loadFontBundle(14, 2.0)
+	tab := newTabSlot(12, 3, 100, false)
+	tab.write([]byte("hello\r\n"))
+	buf := make([]byte, 300*120*4)
+	pal := newColorPalette(config.Defaults())
+	rctx := renderCtx{
+		pal:         &pal,
+		forceAll:    true,
+		showCursor:  true,
+		cursorShape: cursorBlock,
+	}
+	if !render(tab.term, rctx, buf, 300, 120, b.cellW, b.cellH, b.ascent, 10, 12, b.face, b.fallback) {
+		t.Fatal("render returned false")
+	}
+}
+
+func TestRenderTabBarWithDragPreview(t *testing.T) {
+	b := loadFontBundle(14, 2.0)
+	buf := make([]byte, 800*200*4)
+	pal := newColorPalette(config.Defaults())
+	infos := []tabBarInfo{{title: "a"}, {title: "b"}, {title: "c"}}
+	drag := tabDragPreview{active: true, from: 1, over: 2, dx: 20}
+	renderTabBar(buf, 800, 200, 40, b.cellW, b.cellH, b.ascent, 24, b.face, &pal,
+		infos, 0, -1, drag, 2.0, "compact", 0, 76)
+}
+
+func TestRenderTabBarManyTabsOverflow(t *testing.T) {
+	b := loadFontBundle(14, 2.0)
+	buf := make([]byte, 600*120*4)
+	pal := newColorPalette(config.Defaults())
+	infos := make([]tabBarInfo, 12)
+	for i := range infos {
+		infos[i] = tabBarInfo{title: fmt.Sprintf("tab%d", i)}
+	}
+	renderTabBar(buf, 600, 120, 36, b.cellW, b.cellH, b.ascent, 12, b.face, &pal,
+		infos, 3, 5, tabDragPreview{}, 1.0, "compact", 40, 30)
+}
+
+func TestRenderWithSelection(t *testing.T) {
+	b := loadFontBundle(14, 2.0)
+	tab := newTabSlot(8, 2, 100, false)
+	tab.write([]byte("abcd\r\n"))
+	buf := make([]byte, 200*80*4)
+	pal := newColorPalette(config.Defaults())
+	sel := &selectionRange{c0: 0, r0: 0, c1: 2, r1: 0}
+	rctx := renderCtx{pal: &pal, forceAll: true, sel: sel, cursorShape: cursorBlock}
+	render(tab.term, rctx, buf, 200, 80, b.cellW, b.cellH, b.ascent, 0, 0, b.face, b.fallback)
+}
+
+func TestApplyEdgeChrome(t *testing.T) {
+	buf := make([]byte, 400*300*4)
+	pal := newColorPalette(config.Defaults())
+	applyEdgeChrome(buf, 400, 300, 24, 60, 376, 280, 40, 10, &pal)
+}
+
+func TestApplyEdgeChromeBands(t *testing.T) {
+	buf := make([]byte, 400*300*4)
+	pal := newColorPalette(config.Defaults())
+	applyEdgeChromeBands(buf, 400, 300, 60, 280, 40, &pal)
 }

@@ -2,6 +2,8 @@
 package app
 
 import (
+	"sync"
+
 	"github.com/termizard/termizard/internal/adapter"
 	"github.com/termizard/termizard/internal/config"
 	"github.com/termizard/termizard/internal/core/pty"
@@ -62,6 +64,11 @@ func (a *App) Run() error {
 }
 
 func startPTYLoops(ui adapter.UI, p pty.PTY) {
+	// sync.Once ensures ui.Close is called exactly once even when both the
+	// read-error path and the process-exit path fire concurrently.
+	var once sync.Once
+	closeUI := func() { once.Do(func() { _ = ui.Close() }) }
+
 	go func() {
 		buf := make([]byte, 32*1024)
 		for {
@@ -72,7 +79,7 @@ func startPTYLoops(ui adapter.UI, p pty.PTY) {
 				}
 			}
 			if err != nil {
-				_ = ui.Close()
+				closeUI()
 				return
 			}
 		}
@@ -80,6 +87,6 @@ func startPTYLoops(ui adapter.UI, p pty.PTY) {
 
 	go func() {
 		_ = p.Wait()
-		_ = ui.Close()
+		closeUI()
 	}()
 }

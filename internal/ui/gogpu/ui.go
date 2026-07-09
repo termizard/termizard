@@ -21,7 +21,9 @@ import (
 	"github.com/termizard/termizard/internal/util/logger"
 )
 
-var isMac = runtime.GOOS == "darwin"
+const osDarwin = "darwin"
+
+var isMac = runtime.GOOS == osDarwin
 
 const (
 	defaultTitle    = "termizard"
@@ -182,6 +184,17 @@ func (u *UI) initFont(ws *winState, scaleFactor float64) {
 	ws.mu.Unlock()
 }
 
+// tabBarShown reports whether the tab strip is visible for numTabs.
+func (u *UI) tabBarShown(numTabs int) bool {
+	return u.cfg.Tabs.Enabled && (numTabs > 1 || u.cfg.Tabs.ShowWhenSingle)
+}
+
+// invalidateGridCache forces onDraw to recompute cols/rows on the next frame.
+func (ws *winState) invalidateGridCache() {
+	ws.lastCols = -1
+	ws.lastRows = -1
+}
+
 // tabBarHeight returns the physical-pixel height of the tab bar for ws, or 0 if hidden.
 // Vertical chrome above/below tab pills matches the side gutter (cellH + g).
 func (u *UI) tabBarHeight(ws *winState, numTabs int) int {
@@ -198,6 +211,117 @@ func (u *UI) tabBarHeight(ws *winState, numTabs int) int {
 		h = minH
 	}
 	return h
+}
+
+// gridForFrame returns terminal cols/rows for the given framebuffer size and tab count.
+func (u *UI) gridForFrame(ws *winState, fw, fh, numTabs int) (cols, rows int) {
+	cols, rows = 80, 24
+	if fw <= 0 || fh <= 0 || ws.cellW <= 0 || ws.cellH <= 0 {
+		return cols, rows
+	}
+	bl := u.blockLayout(ws, fw, fh, numTabs)
+	if bl.TermW <= 0 || bl.TermH <= 0 {
+		return cols, rows
+	}
+	cols = bl.TermW / ws.cellW
+	rows = bl.TermH / ws.cellH
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	return cols, rows
+}
+
+// viewportGrid returns the terminal cols/rows that fit the window for numTabs.
+func (u *UI) viewportGrid(ws *winState, numTabs int) (cols, rows int) {
+	fw, fh := ws.frameW, ws.frameH
+	if fw <= 0 || fh <= 0 {
+		fw, fh = ws.physicalFrameSize()
+	}
+	return u.gridForFrame(ws, fw, fh, numTabs)
+}
+
+// layoutWindowTabs resizes existing tabs when the viewport grid changes (e.g. tab bar
+// show/hide). New shells are spawned from onDraw via spawnPendingPTYs so the PTY
+// opens at the exact framebuffer grid — avoids a post-spawn SIGWINCH.
+func (u *UI) layoutWindowTabs(ws *winState) {
+	if ws == nil {
+		return
+	}
+	fw, fh := ws.frameW, ws.frameH
+	if fw <= 0 || fh <= 0 {
+		fw, fh = ws.physicalFrameSize()
+	}
+	if fw <= 0 || fh <= 0 || ws.cellW <= 0 || ws.cellH <= 0 {
+		return
+	}
+	cols, rows := u.gridForFrame(ws, fw, fh, len(ws.tabs))
+	u.syncExistingTabsGrid(ws, cols, rows)
+}
+
+// syncExistingTabsGrid resizes tabs that already have a PTY.
+func (u *UI) syncExistingTabsGrid(ws *winState, cols, rows int) {
+	ws.mu.Lock()
+	var existing []*tabSlot
+	for _, t := range ws.tabs {
+		if t != nil && !t.needsPTY {
+			existing = append(existing, t)
+		}
+	}
+	ws.mu.Unlock()
+	resizeTabsToGrid(existing, cols, rows)
+}
+
+// hasPendingPTY reports whether any tab is waiting for a shell.
+func (ws *winState) hasPendingPTY() bool {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	for _, t := range ws.tabs {
+		if t != nil && t.needsPTY {
+			return true
+		}
+	}
+	return false
+}
+
+// spawnPendingPTYsAtGrid starts shells for needsPTY tabs at the onDraw grid size.
+func (u *UI) spawnPendingPTYsAtGrid(ws *winState, cols, rows int) {
+	if ws == nil || ws.win == nil {
+		return
+	}
+	ws.mu.Lock()
+	var pending []*tabSlot
+	for _, t := range ws.tabs {
+		if t != nil && t.needsPTY {
+			pending = append(pending, t)
+		}
+	}
+	ws.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+
+	ws.mu.Lock()
+	ws.layoutInProgress = true
+	ws.lastCols = cols
+	ws.lastRows = rows
+	ws.mu.Unlock()
+	defer func() {
+		ws.mu.Lock()
+		ws.layoutInProgress = false
+		ws.mu.Unlock()
+	}()
+
+	winID := ws.win.ID()
+	for _, tab := range pending {
+		if tab.term.Cols() != cols || tab.term.Rows() != rows {
+			tab.term.Resize(cols, rows)
+		}
+		tab.needsPTY = false
+		u.spawnTabPTY(ws, tab, winID, false)
+	}
 }
 
 // termPadding returns the physical-pixel padding around the terminal grid (config padding_x/y).
@@ -420,6 +544,19 @@ func (u *UI) Run() error {
 		primaryTab := u.primary.tabs[0]
 		primaryTab.keyFn = u.keyFn
 		primaryTab.resizeFn = u.resizeFn
+		primaryTab.refreshPTY = func() {
+			cols, rows := primaryTab.term.Cols(), primaryTab.term.Rows()
+			if cols < 1 {
+				cols = 80
+			}
+			if rows < 1 {
+				rows = 24
+			}
+			if u.resizeFn != nil {
+				togglePTYResize(u.resizeFn, cols, rows)
+			}
+		}
+		primaryTab.pokePTY = func() { u.pokePTYRefresh(primaryTab) }
 		u.wireTabTitle(primaryTab)
 		u.primary.mu.Unlock()
 
@@ -458,6 +595,12 @@ func (u *UI) wireWindow(win *gogpulib.Window, ws *winState) {
 			ws.keyHandled = false
 			return
 		}
+		// macOS may deliver a leaked "t" after Cmd/Ctrl+T even when KeyPress was handled.
+		if ws.suppressLeakT && s == "t" {
+			ws.suppressLeakT = false
+			return
+		}
+		ws.suppressLeakT = false
 		if s == "" {
 			return
 		}
@@ -550,6 +693,12 @@ func (u *UI) openNewWindow() {
 	u.spawnTabPTY(ws, tab, winID, true)
 }
 
+// blockShortcutTextInput suppresses macOS TextInput leakage after Cmd/Ctrl+T only.
+func (u *UI) blockShortcutTextInput(ws *winState) {
+	ws.keyHandled = true
+	ws.suppressLeakT = true
+}
+
 // addNewTab opens a new software tab in the given window.
 // Must be called from the main thread.
 func (u *UI) addNewTab(ws *winState) {
@@ -559,24 +708,24 @@ func (u *UI) addNewTab(ws *winState) {
 	}
 
 	ws.mu.Lock()
-	cols, rows := 80, 24
-	if entry := ws.activeTab(); entry != nil {
-		c := entry.term.Cols()
-		r := entry.term.Rows()
-		if c > 0 {
-			cols = c
-		}
-		if r > 0 {
-			rows = r
-		}
-	}
+	numTabsAfter := len(ws.tabs) + 1
+	cols, rows := u.viewportGrid(ws, numTabsAfter)
 	tab := newTabSlot(cols, rows, scrollback, u.cfg.Terminal.ReflowOnResize)
+	tab.needsPTY = true
 	ws.tabs = append(ws.tabs, tab)
 	ws.activeTabIdx = len(ws.tabs) - 1
+	barAfter := u.tabBarShown(len(ws.tabs))
+	if barAfter != ws.lastTabBarShown {
+		ws.invalidateGridCache()
+		ws.lastTabBarShown = barAfter
+	}
+	ws.hoverTabIdx = -1
+	ws.tabHoverLock = true
 	ws.mu.Unlock()
 
-	winID := ws.win.ID()
-	u.spawnTabPTY(ws, tab, winID, false)
+	// Shrink existing tabs when the tab bar first appears (1→2); spawn the new
+	// shell on the next onDraw at the exact framebuffer grid.
+	u.syncExistingTabsGrid(ws, cols, rows)
 	u.app.RequestRedraw()
 }
 
@@ -586,10 +735,18 @@ func (u *UI) addNewTab(ws *winState) {
 func (u *UI) spawnTabPTY(ws *winState, tab *tabSlot, winID gogpulib.WindowID, closeWindowOnExit bool) {
 	env, _ := u.cfg.ShellEnvironment(nil)
 
+	cols, rows := 80, 24
+	if tab != nil {
+		if c, r := tab.term.Cols(), tab.term.Rows(); c > 0 && r > 0 {
+			cols, rows = c, r
+		}
+	}
+	ptyCols, ptyRows := pty.ClampSize(cols, rows)
+
 	p, ptyErr := pty.Open(pty.Config{
 		Command: u.cfg.ShellCommand(),
-		Cols:    80,
-		Rows:    24,
+		Cols:    ptyCols,
+		Rows:    ptyRows,
 		Env:     env,
 	})
 	if ptyErr != nil {
@@ -600,10 +757,33 @@ func (u *UI) spawnTabPTY(ws *winState, tab *tabSlot, winID gogpulib.WindowID, cl
 		return
 	}
 
+	tab.ptyReady.Store(false)
 	tab.keyFn = func(e adapter.KeyEvent) { _, _ = p.Write(e.Data) }
-	tab.resizeFn = func(e adapter.ResizeEvent) { _ = p.Resize(e.Cols, e.Rows) }
+	tab.ptyW = ptyCols
+	tab.ptyH = ptyRows
+	tab.resizeFn = func(e adapter.ResizeEvent) {
+		if tab.ptyW == e.Cols && tab.ptyH == e.Rows {
+			return
+		}
+		tab.ptyW = e.Cols
+		tab.ptyH = e.Rows
+		_ = p.Resize(e.Cols, e.Rows)
+	}
+	tab.refreshPTY = func() {
+		c, r := tab.term.Cols(), tab.term.Rows()
+		if c < 1 || r < 1 {
+			c, r = cols, rows
+		}
+		pc, pr := pty.ClampSize(c, r)
+		if pr > 2 {
+			_ = p.Resize(pc, pr-1)
+		}
+		_ = p.Resize(pc, pr)
+	}
+	tab.pokePTY = func() { u.pokePTYRefresh(tab) }
 	tab.closePTY = func() { _ = p.Close() }
 	u.wireTabTitle(tab)
+	tab.ptyReady.Store(true)
 
 	go func() {
 		buf := make([]byte, 32*1024)
@@ -611,8 +791,10 @@ func (u *UI) spawnTabPTY(ws *winState, tab *tabSlot, winID gogpulib.WindowID, cl
 			n, rdErr := p.Read(buf)
 			if n > 0 {
 				tab.write(buf[:n])
-				ws.dirty.Store(true)
-				u.app.RequestRedraw()
+				if tab.ptyReady.Load() {
+					ws.dirty.Store(true)
+					u.app.RequestRedraw()
+				}
 			}
 			if rdErr != nil {
 				if !errors.Is(rdErr, io.EOF) {
@@ -670,15 +852,24 @@ func (u *UI) closeTabAtIndex(ws *winState, idx int) {
 		ws.mu.Unlock()
 		return
 	}
+	barBefore := u.tabBarShown(len(ws.tabs))
 	tab := ws.tabs[idx]
 	ws.tabs = append(ws.tabs[:idx], ws.tabs[idx+1:]...)
 	if ws.activeTabIdx >= len(ws.tabs) {
 		ws.activeTabIdx = max(0, len(ws.tabs)-1)
 	}
+	barAfter := u.tabBarShown(len(ws.tabs))
+	if barBefore != barAfter {
+		ws.invalidateGridCache()
+		ws.lastTabBarShown = barAfter
+	}
 	ws.mu.Unlock()
 
 	if tab.closePTY != nil {
 		tab.closePTY()
+	}
+	if barBefore != barAfter {
+		u.layoutWindowTabs(ws)
 	}
 	u.app.RequestRedraw()
 }
@@ -754,13 +945,23 @@ func (u *UI) OnKeyInput(fn func(adapter.KeyEvent)) { u.keyFn = fn }
 // OnResize registers the callback for terminal grid size changes on the primary window.
 func (u *UI) OnResize(fn func(adapter.ResizeEvent)) { u.resizeFn = fn }
 
+// pokePTYRefresh forces SIGWINCH (with a brief row toggle) so tmux redraws its
+// status bar immediately after a full-screen clear.
+func (u *UI) pokePTYRefresh(tab *tabSlot) {
+	if tab == nil {
+		return
+	}
+	refreshPTYSize(tab)
+	u.app.RequestRedraw()
+}
+
 // RequestRedraw schedules a new draw frame.
 func (u *UI) RequestRedraw() { u.app.RequestRedraw() }
 
-// Write feeds raw PTY output to the primary window's active tab.
+// Write feeds raw PTY output from app.New's primary shell to tab 0.
 func (u *UI) Write(data []byte) (int, error) {
 	u.primary.mu.Lock()
-	entry := u.primary.activeTab()
+	entry := u.primary.shellTab()
 	u.primary.mu.Unlock()
 	if entry != nil {
 		entry.write(data)
@@ -780,7 +981,7 @@ func (u *UI) NotifyShellError(tabID int, err error) {
 	}
 	msg := fmt.Sprintf("\r\n\x1b[31m[termizard] shell error (tab %d): %s\x1b[0m\r\n", tabID, err.Error())
 	u.primary.mu.Lock()
-	entry := u.primary.activeTab()
+	entry := u.primary.shellTab()
 	u.primary.mu.Unlock()
 	if entry != nil {
 		entry.write([]byte(msg))
@@ -841,9 +1042,17 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 			}
 		}
 	}
+	barShown := u.tabBarShown(numTabs)
+	if barShown != ws.lastTabBarShown {
+		ws.invalidateGridCache()
+		ws.lastTabBarShown = barShown
+	}
 	ws.mu.Unlock()
 
 	hoverTabIdx := ws.hoverTabIdx
+	if ws.tabHoverLock {
+		hoverTabIdx = -1
+	}
 
 	dragPreview := tabDragPreview{
 		active: ws.dragActive,
@@ -901,6 +1110,7 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 		sel = &selectionRange{c0: c0, r0: r0, c1: c1, r1: r1}
 	}
 	selChanged := (sel != nil) != ws.lastSelActive
+	layoutInProgress := ws.layoutInProgress
 
 	if gridChanged {
 		if ws.tex != nil {
@@ -972,13 +1182,20 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 
 	ws.mu.Unlock()
 
-	// Resize terminal if the grid changed.
-	if gridChanged {
-		entry.term.Resize(newCols, newRows)
-		if fn := entry.resizeFn; fn != nil {
-			c, r := pty.ClampSize(newCols, newRows)
-			fn(adapter.ResizeEvent{Cols: c, Rows: r})
-		}
+	// Spawn new shells at the exact onDraw grid before any resize pass.
+	hadPendingPTY := ws.hasPendingPTY()
+	if hadPendingPTY {
+		u.spawnPendingPTYsAtGrid(ws, newCols, newRows)
+	}
+
+	// Resize terminals when the viewport grid changes.
+	if gridChanged && !layoutInProgress && !hadPendingPTY {
+		ws.mu.Lock()
+		tabs := ws.tabs
+		ws.mu.Unlock()
+		resizeTabsToGrid(tabs, newCols, newRows)
+	} else if tabSwitch && !layoutInProgress && !hadPendingPTY && (entry.term.Cols() != newCols || entry.term.Rows() != newRows) {
+		resizeTabsToGrid([]*tabSlot{entry}, newCols, newRows)
 	}
 
 	scrollOff := int(entry.scrollOffset.Load())
@@ -1004,16 +1221,6 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	// Soft-wrap at the bottom scrolls the grid: must repaint every row or the
 	// prompt / start of the input line stays as stale pixels (Kitty keeps them).
 	forceAll := gridChanged || scrollChanged || termScrolled || selChanged || blinkChanged || (tabSwitch && !dragPreview.active)
-
-	rctx := renderCtx{
-		pal:         &u.palette,
-		cursorShape: u.cursorShape,
-		showCursor:  showCursor,
-		scrollOff:   scrollOff,
-		prevCurRow:  prevCurRow,
-		forceAll:    forceAll,
-		sel:         sel,
-	}
 
 	// Paint native title underlay (macOS FullSizeContent) + tab bar.
 	tabPainted := false
@@ -1057,12 +1264,37 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	contentR := contentL + newCols*ws.cellW
 	contentB := termTop + newRows*ws.cellH
 	chromeTop := bl.ChromeTop
+	cornerR := contentCornerRadius(g)
 	if forceAll || gridChanged || surfaceChanged || ws.tex == nil {
-		applyEdgeChrome(frame, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop, &u.palette)
+		applyEdgeChrome(frame, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop, cornerR, &u.palette)
+	}
+
+	rctx := renderCtx{
+		pal:         &u.palette,
+		cursorShape: u.cursorShape,
+		showCursor:  showCursor,
+		scrollOff:   scrollOff,
+		prevCurRow:  prevCurRow,
+		forceAll:    forceAll,
+		sel:         sel,
+		clipL:       contentL,
+		clipT:       contentT,
+		clipR:       contentR,
+		clipB:       contentB,
+		clipRad:     cornerR,
+		clipSet:     cornerR > 0,
 	}
 
 	// Render the terminal into the padded viewport below the tab bar.
+	// paintTerminalBackdrop is only needed on full repaints: it fills the
+	// entire inset (including fractional pixels beyond the last grid row/col)
+	// with pal.bg. On cursor-only frames the buffer retains the previous frame,
+	// so calling it would blank all non-dirty rows before render repaints them,
+	// producing a one-frame flicker on every cursor move.
 	entry.parseMu.Lock()
+	if forceAll || gridChanged || surfaceChanged || ws.tex == nil {
+		paintTerminalBackdrop(frame, frameW, frameH, contentL, contentT, contentR, contentB, cornerR, &u.palette)
+	}
 	painted := render(entry.term, rctx, frame, frameW, frameH, ws.cellW, ws.cellH, ws.cellAscent, termTop, contentL, ws.face, ws.faceFallback)
 	if painted && scrollOff == 0 {
 		entry.term.ClearDirty()
@@ -1101,8 +1333,7 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	needUpdate := painted || tabPainted || curRow != prevCurRow || curCol != prevCurCol ||
 		scrollChanged || selChanged || blinkChanged || gridChanged || surfaceChanged || ws.tex == nil
 	if needUpdate {
-		// Top/bottom only after glyphs — never re-wipe left/right (glyph bearings).
-		applyEdgeChromeBands(frame, frameW, frameH, contentT, contentB, chromeTop, &u.palette)
+		applyEdgeChromeAfterGlyphs(frame, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop, cornerR, &u.palette)
 	}
 
 	if ws.tex == nil {
@@ -1170,8 +1401,8 @@ func (u *UI) handleScroll(ws *winState, ev gpucontext.ScrollEvent) {
 	tbH := u.tabBarHeight(ws, numTabs)
 
 	// Horizontal scroll over the tab bar (Rio / Wails overflow).
-	if tbH > 0 && ws.win != nil {
-		fw, fh := ws.win.PhysicalSize()
+	if tbH > 0 && ws.hasFrameSize() {
+		fw, fh := ws.physicalFrameSize()
 		bl := u.blockLayout(ws, fw, fh, numTabs)
 		if bl.TabTop >= 0 && physY >= bl.TabTop && physY < bl.TabTop+tbH {
 			tabW, _, tabsAreaW := computeTabLayout(fw, bl.G, numTabs, ws.cellW, ws.scaleFactor, u.cfg.Tabs.Size)
@@ -1266,10 +1497,6 @@ func (u *UI) handleKeyPress(ws *winState, key gpucontext.Key, mods gpucontext.Mo
 		return
 	}
 
-	// Fresh keypress — clear stale suppress flag from a prior special key with
-	// no following TextInput (e.g. Backspace alone).
-	ws.keyHandled = false
-
 	u.debugf("key key=%v mods=%v", key, mods)
 
 	// Modifier-only keys (Cmd/Ctrl/Shift/Alt) must NOT clear selection —
@@ -1278,32 +1505,16 @@ func (u *UI) handleKeyPress(ws *winState, key gpucontext.Key, mods gpucontext.Mo
 		return
 	}
 
-	// Platform shortcuts (mirror frontend/src/keybindings.ts).
-	// Copy/Paste/Scroll/Font must NOT clear the current selection.
-	if action := matchPlatformBinding(key, mods, isMac); action != "" {
-		u.debugf("key platform action=%s", action)
-		u.handleAction(ws, action)
-		ws.keyHandled = true
-		return
-	}
-
-	// Config keybindings.
-	if action := matchBinding(key, mods, u.bindings); action != "" {
-		u.debugf("key config action=%s", action)
-		u.handleAction(ws, action)
-		ws.keyHandled = true
-		return
-	}
-
-	// Platform tab/window shortcuts (same set as the Wails frontend).
+	// Platform tab/window shortcuts before clearing keyHandled — macOS may deliver
+	// TextInput for the letter before KeyPress returns.
 	if isMac {
 		if mods == gpucontext.ModSuper {
 			switch key {
 			case gpucontext.KeyT:
 				if u.cfg.Tabs.Enabled {
+					u.blockShortcutTextInput(ws)
 					u.addNewTab(ws)
 				}
-				ws.keyHandled = true
 				return
 			case gpucontext.KeyN:
 				u.openNewWindow()
@@ -1332,9 +1543,9 @@ func (u *UI) handleKeyPress(ws *winState, key gpucontext.Key, mods gpucontext.Mo
 			switch key {
 			case gpucontext.KeyT:
 				if u.cfg.Tabs.Enabled {
+					u.blockShortcutTextInput(ws)
 					u.addNewTab(ws)
 				}
-				ws.keyHandled = true
 				return
 			case gpucontext.KeyN:
 				u.openNewWindow()
@@ -1357,6 +1568,27 @@ func (u *UI) handleKeyPress(ws *winState, key gpucontext.Key, mods gpucontext.Mo
 				return
 			}
 		}
+	}
+
+	// Fresh keypress — clear stale suppress flag from a prior special key with
+	// no following TextInput (e.g. Backspace alone).
+	ws.keyHandled = false
+
+	// Platform shortcuts (mirror frontend/src/keybindings.ts).
+	// Copy/Paste/Scroll/Font must NOT clear the current selection.
+	if action := matchPlatformBinding(key, mods, isMac); action != "" {
+		u.debugf("key platform action=%s", action)
+		u.handleAction(ws, action)
+		ws.keyHandled = true
+		return
+	}
+
+	// Config keybindings.
+	if action := matchBinding(key, mods, u.bindings); action != "" {
+		u.debugf("key config action=%s", action)
+		u.handleAction(ws, action)
+		ws.keyHandled = true
+		return
 	}
 
 	seq := keyToSeq(key, mods, entry.term.AppCursorKeys())
@@ -1468,6 +1700,11 @@ func (u *UI) handleAction(ws *winState, action string) {
 		entry.parser.Advance(entry.term, []byte("\x1b[3J"))
 		entry.parseMu.Unlock()
 		entry.sendInput([]byte{0x0c})
+		if fn := entry.pokePTY; fn != nil {
+			fn()
+		} else {
+			refreshPTYSize(entry)
+		}
 		ws.dirty.Store(true)
 		u.app.RequestRedraw()
 
@@ -1598,14 +1835,17 @@ func (u *UI) handlePointer(ws *winState, ev gpucontext.PointerEvent) {
 	numTabs := len(ws.tabs)
 	ws.mu.Unlock()
 	tbH := u.tabBarHeight(ws, numTabs)
-	if ws.win == nil {
+	if !ws.hasFrameSize() {
 		return
 	}
-	fw, fh := ws.win.PhysicalSize()
+	fw, fh := ws.physicalFrameSize()
 	bl := u.blockLayout(ws, fw, fh, numTabs)
 
 	// Hover-tab tracking: update hoverTabIdx on every pointer move.
 	if ev.Type == gpucontext.PointerMove && tbH > 0 && bl.TabTop >= 0 {
+		if ws.tabHoverLock {
+			ws.tabHoverLock = false
+		}
 		if physY >= bl.TabTop && physY < bl.TabTop+tbH {
 			padX := u.termPadding(ws)
 			ws.mu.Lock()
@@ -1647,8 +1887,8 @@ func (u *UI) handlePointer(ws *winState, ev gpucontext.PointerEvent) {
 		return
 	}
 
-	col := clampInt(adjX/cW, 0, entry.term.Cols()-1)
-	row := clampInt(adjY/cH, 0, entry.term.Rows()-1)
+	col := clampInt(adjX/cW, entry.term.Cols()-1)
+	row := clampInt(adjY/cH, entry.term.Rows()-1)
 
 	switch ev.Type {
 	case gpucontext.PointerDown:
@@ -1699,7 +1939,7 @@ func (u *UI) handlePointer(ws *winState, ev gpucontext.PointerEvent) {
 
 // handleTabBarPointer processes left-button events in the tab bar area (physical pixels).
 func (u *UI) handleTabBarPointer(ws *winState, ev gpucontext.PointerEvent, physX, physY, numTabs int) {
-	fw, _ := ws.win.PhysicalSize()
+	fw, _ := ws.physicalFrameSize()
 	padX := u.termPadding(ws)
 	tabW, plusX, tabsAreaW := computeTabLayout(fw, padX, numTabs, ws.cellW, ws.scaleFactor, u.cfg.Tabs.Size)
 	plusW := plusBtnWidth(ws.cellW, ws.scaleFactor)
@@ -1791,8 +2031,8 @@ func (u *UI) handleTabPointer(ws *winState, ev gpucontext.PointerEvent, physX, p
 			ws.dragTabIdx = ws.tabPressIdx
 			ws.dragOverIdx = ws.tabPressIdx
 		}
-		if ws.dragActive && ws.win != nil {
-			fw, _ := ws.win.PhysicalSize()
+		if ws.dragActive && ws.hasFrameSize() {
+			fw, _ := ws.physicalFrameSize()
 			padX := u.termPadding(ws)
 			tabW, _, tabsAreaW := computeTabLayout(fw, padX, numTabs, ws.cellW, ws.scaleFactor, u.cfg.Tabs.Size)
 			maxScroll := tabScrollMax(numTabs, tabW, tabsAreaW)
@@ -1886,13 +2126,13 @@ func (u *UI) handleTabPointer(ws *winState, ev gpucontext.PointerEvent, physX, p
 
 // ensureTabVisible scrolls the tab strip so idx is inside the visible area.
 func (u *UI) ensureTabVisible(ws *winState, idx int) {
-	if ws.win == nil || idx < 0 {
+	if idx < 0 || !ws.hasFrameSize() {
 		return
 	}
 	ws.mu.Lock()
 	numTabs := len(ws.tabs)
 	ws.mu.Unlock()
-	fw, _ := ws.win.PhysicalSize()
+	fw, _ := ws.physicalFrameSize()
 	padX := u.termPadding(ws)
 	tabW, _, tabsAreaW := computeTabLayout(fw, padX, numTabs, ws.cellW, ws.scaleFactor, u.cfg.Tabs.Size)
 	maxScroll := tabScrollMax(numTabs, tabW, tabsAreaW)
@@ -1933,9 +2173,9 @@ func (u *UI) reorderTab(ws *winState, from, to int) {
 	}
 }
 
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
+func clampInt(v, hi int) int {
+	if v < 0 {
+		return 0
 	}
 	if v > hi {
 		return hi
@@ -1948,6 +2188,25 @@ func absInt(v int) int {
 		return -v
 	}
 	return v
+}
+
+// resizeTabsToGrid updates every tab's terminal grid and notifies PTYs.
+func resizeTabsToGrid(tabs []*tabSlot, cols, rows int) {
+	ptyCols, ptyRows := pty.ClampSize(cols, rows)
+	for _, tab := range tabs {
+		if tab == nil || tab.needsPTY {
+			continue
+		}
+		if tab.term.Cols() != cols || tab.term.Rows() != rows {
+			tab.term.Resize(cols, rows)
+		}
+		if tab.ptyW == ptyCols && tab.ptyH == ptyRows {
+			continue
+		}
+		if fn := tab.resizeFn; fn != nil {
+			fn(adapter.ResizeEvent{Cols: ptyCols, Rows: ptyRows})
+		}
+	}
 }
 
 // ── Scroll helper ─────────────────────────────────────────────────────────────

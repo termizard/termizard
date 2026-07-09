@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
@@ -40,6 +41,13 @@ type renderCtx struct {
 	prevCurRow  int // previous cursor row, used to erase the old cursor on repaint
 	forceAll    bool
 	sel         *selectionRange // nil = no active selection
+	// Rounded terminal inset clip (physical pixels).
+	clipSet bool
+	clipL   int
+	clipT   int
+	clipR   int
+	clipB   int
+	clipRad int
 }
 
 // tabBarInfo holds the display data for one tab in the software tab bar.
@@ -66,16 +74,17 @@ const (
 	tabFGDimActive   = 0    // dimColor amount for active tab text (full brightness)
 	tabFGDimInactive = 100  // dimColor amount for inactive tab text
 	tabFGDimHovered  = 60   // dimColor amount for hovered inactive tab text (brighter)
-	tabFGDimClose    = 120  // dimColor amount for close × glyph
+	tabFGDimClose    = 120  // dimColor amount for close × glyph (inactive, no hover)
+	tabFGDimCloseHov = 20   // dimColor amount for close × on hovered inactive tab
 	tabFGDimPlus     = 90   // dimColor amount for + button glyph
 	tabFGDimTitle    = 60   // dimColor amount for window title text
 	tabCloseExtraW   = 16   // extra width that the close button zone adds beyond cellW (padX)
 )
 
-// chromeGreen / chromeGray: Fleet diagonal chrome (olive-teal top-left → dark charcoal bottom-right).
+// chromeGreen / chromeGray: Fleet diagonal chrome (subtle teal top-left → near-black bottom-right).
 var (
-	chromeGreen = color.RGBA{R: 0x27, G: 0x38, B: 0x30, A: 255} // olive-teal (more saturated)
-	chromeGray  = color.RGBA{R: 0x20, G: 0x21, B: 0x24, A: 255} // dark charcoal
+	chromeGreen = color.RGBA{R: 0x24, G: 0x33, B: 0x35, A: 255} // subtle dark teal (Fleet corner accent)
+	chromeGray  = color.RGBA{R: 0x1b, G: 0x1d, B: 0x20, A: 255} // near-black charcoal (Fleet interior)
 )
 
 // chromePanel is a mid-gradient solid (Clear / fallbacks). Active tab + editor use pal.bg.
@@ -422,9 +431,13 @@ func drawTabClipped(buf []byte, frameW, tbH, yOffset, x, tabW, clipR, cellW, cel
 	if numTabs > 1 {
 		closeX := x + tabW - cellW - padX
 		if closeX > x+padX && closeX+cellW <= clipR && closeX+cellW <= frameW {
+			closeFG := dimColor(pal.fg, tabFGDimClose)
+			if hovered {
+				closeFG = dimColor(pal.fg, tabFGDimCloseHov)
+			}
 			dot := fixed.P(closeX, textTop+cellAscent)
 			if dr, mask, maskp, _, ok := face.Glyph(dot, '×'); ok {
-				blitGlyph(buf, frameW, dr, mask, maskp, dimColor(pal.fg, tabFGDimClose))
+				blitGlyph(buf, frameW, dr, mask, maskp, closeFG)
 			}
 		}
 	}
@@ -495,11 +508,10 @@ func blendRGBA(a, b color.RGBA, t float64) color.RGBA {
 	return color.RGBA{R: mix(a.R, b.R), G: mix(a.G, b.G), B: mix(a.B, b.B), A: 255}
 }
 
-// applyEdgeChrome fills padding around the terminal grid with green→gray chrome.
+// applyEdgeChrome fills padding around the terminal grid with the diagonal chrome gradient.
 // Side gutters start from chromeTop so the chrome flows continuously from the top
-// (no color discontinuity between the top gutter and the side gutters).
-// A 6-px bearing allowance is left on each side so col-0 / last-col ink is not wiped.
-func applyEdgeChrome(buf []byte, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop int, pal *colorPalette) {
+// with no color discontinuity between the top gutter and the side gutters.
+func applyEdgeChrome(buf []byte, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop, cornerR int, pal *colorPalette) {
 	if pal == nil || frameW <= 0 || frameH <= 0 || len(buf) < frameW*frameH*4 {
 		return
 	}
@@ -524,19 +536,243 @@ func applyEdgeChrome(buf []byte, frameW, frameH, contentL, contentT, contentR, c
 
 	fillChromeRect(buf, frameW, frameH, 0, chromeTop, frameW, contentT)
 	fillChromeRect(buf, frameW, frameH, 0, contentB, frameW, frameH)
-	// Side gutters outside glyph bearing allowance — start from chromeTop so the
-	// chrome color is continuous from the top chrome band down to the bottom.
-	bear := contentL
-	if bear > 6 {
-		bear = 6
+	applyEdgeChromeSides(buf, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop, cornerR)
+}
+
+// contentCornerRadius returns the physical-pixel radius for rounding the terminal inset.
+func contentCornerRadius(g int) int {
+	r := g / 2
+	if r < 8 {
+		r = 8
 	}
-	leftWipe := contentL - bear
-	if leftWipe > 0 {
-		fillChromeRect(buf, frameW, frameH, 0, chromeTop, leftWipe, contentB)
+	if r > 14 {
+		r = 14
 	}
-	rightWipe := contentR + bear
-	if rightWipe < frameW {
-		fillChromeRect(buf, frameW, frameH, rightWipe, chromeTop, frameW, contentB)
+	return r
+}
+
+func clamp01(t float64) float64 {
+	if t < 0 {
+		return 0
+	}
+	if t > 1 {
+		return 1
+	}
+	return t
+}
+
+// normCornerRadius clamps radius to the inset rectangle.
+func normCornerRadius(radius, w, h int) int {
+	if radius < 0 {
+		radius = 0
+	}
+	if radius*2 > w {
+		radius = w / 2
+	}
+	if radius*2 > h {
+		radius = h / 2
+	}
+	return radius
+}
+
+// roundRectCoverage returns the inside fraction (0..1) at pixel center (px,py)
+// for an axis-aligned rounded rectangle with anti-aliased edges.
+func roundRectCoverage(px, py float64, x0, y0, x1, y1, radius int) float64 {
+	if px < float64(x0) || px >= float64(x1) || py < float64(y0) || py >= float64(y1) {
+		return 0
+	}
+	w, h := x1-x0, y1-y0
+	radius = normCornerRadius(radius, w, h)
+	if radius <= 0 {
+		return 1
+	}
+	rf := float64(radius)
+	x0f, y0f := float64(x0), float64(y0)
+	x1f, y1f := float64(x1), float64(y1)
+
+	// Corner quadrants: circular arcs (must run before the cross-arm shortcut).
+	if px < x0f+rf && py < y0f+rf {
+		return clamp01(rf + 1.0 - math.Hypot(px-(x0f+rf), py-(y0f+rf)))
+	}
+	if px >= x1f-rf && py < y0f+rf {
+		return clamp01(rf + 1.0 - math.Hypot(px-(x1f-rf), py-(y0f+rf)))
+	}
+	if px < x0f+rf && py >= y1f-rf {
+		return clamp01(rf + 1.0 - math.Hypot(px-(x0f+rf), py-(y1f-rf)))
+	}
+	if px >= x1f-rf && py >= y1f-rf {
+		return clamp01(rf + 1.0 - math.Hypot(px-(x1f-rf), py-(y1f-rf)))
+	}
+	// Cross arms (flat edges between corners).
+	if (px >= x0f+rf && px < x1f-rf) || (py >= y0f+rf && py < y1f-rf) {
+		return 1
+	}
+	return 0
+}
+
+func sideFeatherPad(inset int) int {
+	if inset > 6 {
+		return 6
+	}
+	return inset
+}
+
+// featherTerminalCornersAA anti-aliases the four inner corners of the terminal
+// inset by blending chrome over terminal pixels outside the rounded curve.
+func featherTerminalCornersAA(buf []byte, frameW, frameH, contentL, contentT, contentR, contentB, radius int) {
+	if radius <= 0 || contentR <= contentL || contentB <= contentT || frameW <= 0 || frameH <= 0 {
+		return
+	}
+	w, h := contentR-contentL, contentB-contentT
+	radius = normCornerRadius(radius, w, h)
+	if radius <= 0 {
+		return
+	}
+	regions := []struct{ x0, y0, x1, y1 int }{
+		{contentL - sideFeatherPad(contentL), contentT, contentL + radius, contentT + radius},
+		{contentR - radius, contentT, contentR + sideFeatherPad(frameW-contentR), contentT + radius},
+		{contentL - sideFeatherPad(contentL), contentB - radius, contentL + radius, contentB},
+		{contentR - radius, contentB - radius, contentR + sideFeatherPad(frameW-contentR), contentB},
+	}
+	stride := frameW * 4
+	for _, reg := range regions {
+		yA := reg.y0
+		if yA < 0 {
+			yA = 0
+		}
+		yB := reg.y1
+		if yB > frameH {
+			yB = frameH
+		}
+		xA := reg.x0
+		if xA < 0 {
+			xA = 0
+		}
+		xB := reg.x1
+		if xB > frameW {
+			xB = frameW
+		}
+		for y := yA; y < yB; y++ {
+			py := float64(y) + 0.5
+			row := y * stride
+			for x := xA; x < xB; x++ {
+				cov := roundRectCoverage(float64(x)+0.5, py, contentL, contentT, contentR, contentB, radius)
+				if cov >= 1 {
+					continue
+				}
+				off := row + x*4
+				if off+3 >= len(buf) {
+					return
+				}
+				chrome := chromeAtXY(x, y, frameW, frameH)
+				if cov <= 0 {
+					buf[off] = chrome.R
+					buf[off+1] = chrome.G
+					buf[off+2] = chrome.B
+					buf[off+3] = chrome.A
+					continue
+				}
+				term := color.RGBA{R: buf[off], G: buf[off+1], B: buf[off+2], A: buf[off+3]}
+				c := blendRGBA(chrome, term, cov)
+				buf[off] = c.R
+				buf[off+1] = c.G
+				buf[off+2] = c.B
+				buf[off+3] = c.A
+			}
+		}
+	}
+}
+
+// applyEdgeChromeSides fills the left and right chrome gutters from chromeTop to
+// the bottom of the frame. The full-width wipe (no bearing allowance) eliminates
+// the horizontal seam that would otherwise appear at the corner-radius transition
+// (y = contentT±radius) where coverage used to step from contentL to contentL-6.
+func applyEdgeChromeSides(buf []byte, frameW, frameH, contentL, _, contentR, _, chromeTop, _ int) {
+	if contentL > 0 {
+		fillChromeRect(buf, frameW, frameH, 0, chromeTop, contentL, frameH)
+	}
+	if contentR < frameW {
+		fillChromeRect(buf, frameW, frameH, contentR, chromeTop, frameW, frameH)
+	}
+}
+
+// applyEdgeChromeAfterGlyphs refreshes chrome around the terminal after glyph paint.
+func applyEdgeChromeAfterGlyphs(buf []byte, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop, cornerR int, pal *colorPalette) {
+	applyEdgeChromeBands(buf, frameW, frameH, contentT, contentB, chromeTop, pal)
+	applyEdgeChromeSides(buf, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop, cornerR)
+	featherTerminalCornersAA(buf, frameW, frameH, contentL, contentT, contentR, contentB, cornerR)
+}
+
+// paintTerminalBackdrop fills the terminal inset with pal.bg, anti-aliasing the
+// rounded corners over the chrome gutters so square cell paints never leave seams.
+func paintTerminalBackdrop(buf []byte, frameW, frameH, contentL, contentT, contentR, contentB, cornerR int, pal *colorPalette) {
+	if pal == nil || contentR <= contentL || contentB <= contentT {
+		return
+	}
+	w, h := contentR-contentL, contentB-contentT
+	radius := normCornerRadius(cornerR, w, h)
+	if radius <= 0 {
+		fillRect(buf, frameW, contentL, contentT, contentR, contentB, pal.bg)
+		return
+	}
+	// Solid cross (interior bands) — cheap and covers the glyph grid.
+	fillRect(buf, frameW, contentL+radius, contentT, contentR-radius, contentB, pal.bg)
+	fillRect(buf, frameW, contentL, contentT+radius, contentL+radius, contentB-radius, pal.bg)
+	fillRect(buf, frameW, contentR-radius, contentT+radius, contentR, contentB-radius, pal.bg)
+	// AA only in the four corner squares.
+	paintRoundRectCornersAA(buf, frameW, frameH, contentL, contentT, contentR, contentB, radius, pal.bg)
+}
+
+func paintRoundRectCornersAA(buf []byte, frameW, frameH, x0, y0, x1, y1, radius int, fill color.RGBA) {
+	regions := []struct{ xa, ya, xb, yb int }{
+		{x0, y0, x0 + radius, y0 + radius},
+		{x1 - radius, y0, x1, y0 + radius},
+		{x0, y1 - radius, x0 + radius, y1},
+		{x1 - radius, y1 - radius, x1, y1},
+	}
+	stride := frameW * 4
+	for _, reg := range regions {
+		yA, yB := reg.ya, reg.yb
+		if yA < 0 {
+			yA = 0
+		}
+		if yB > frameH {
+			yB = frameH
+		}
+		xA, xB := reg.xa, reg.xb
+		if xA < 0 {
+			xA = 0
+		}
+		if xB > frameW {
+			xB = frameW
+		}
+		for y := yA; y < yB; y++ {
+			py := float64(y) + 0.5
+			row := y * stride
+			for x := xA; x < xB; x++ {
+				cov := roundRectCoverage(float64(x)+0.5, py, x0, y0, x1, y1, radius)
+				if cov <= 0 {
+					continue
+				}
+				off := row + x*4
+				if off+3 >= len(buf) {
+					return
+				}
+				if cov >= 1 {
+					buf[off] = fill.R
+					buf[off+1] = fill.G
+					buf[off+2] = fill.B
+					buf[off+3] = fill.A
+					continue
+				}
+				under := color.RGBA{R: buf[off], G: buf[off+1], B: buf[off+2], A: buf[off+3]}
+				c := blendRGBA(under, fill, cov)
+				buf[off] = c.R
+				buf[off+1] = c.G
+				buf[off+2] = c.B
+				buf[off+3] = c.A
+			}
+		}
 	}
 }
 
@@ -729,11 +965,22 @@ func render(t *terminal.Terminal, rctx renderCtx, buf []byte, frameW, frameH, cW
 			for y := y0; y < y1; y++ {
 				rowOff := y * frameW * 4
 				for x := x0; x < x1; x++ {
+					pixelBG := bg
+					if rctx.clipSet {
+						cov := roundRectCoverage(float64(x)+0.5, float64(y)+0.5, rctx.clipL, rctx.clipT, rctx.clipR, rctx.clipB, rctx.clipRad)
+						if cov <= 0 {
+							continue
+						}
+						if cov < 1 {
+							chrome := chromeAtXY(x, y, frameW, frameH)
+							pixelBG = blendRGBA(chrome, bg, cov)
+						}
+					}
 					off := rowOff + x*4
-					buf[off] = bg.R
-					buf[off+1] = bg.G
-					buf[off+2] = bg.B
-					buf[off+3] = bg.A
+					buf[off] = pixelBG.R
+					buf[off+1] = pixelBG.G
+					buf[off+2] = pixelBG.B
+					buf[off+3] = pixelBG.A
 				}
 			}
 
@@ -769,7 +1016,7 @@ func render(t *terminal.Terminal, rctx renderCtx, buf []byte, frameW, frameH, cW
 					if clipR > frameW {
 						clipR = frameW
 					}
-					blitGlyphClipped(buf, frameW, dr, mask, maskp, fg, clipL, y0, clipR, y1)
+					blitGlyphClipped(buf, frameW, dr, mask, maskp, fg, clipL, y0, clipR, y1, &rctx)
 				}
 			}
 
@@ -850,14 +1097,14 @@ func boostGlyphAlpha(a uint8) uint8 { return boostAlphaLUT[a] }
 
 // blitGlyph composites a glyph mask onto the RGBA frame buffer (frame-bounded).
 func blitGlyph(buf []byte, frameW int, dr image.Rectangle, mask image.Image, maskp image.Point, fg color.RGBA) {
-	blitGlyphClipped(buf, frameW, dr, mask, maskp, fg, 0, 0, frameW, 0)
+	blitGlyphClipped(buf, frameW, dr, mask, maskp, fg, 0, 0, frameW, 0, nil)
 }
 
 // blitGlyphClipped composites a glyph, discarding ink outside [cx0,cx1)×[cy0,cy1).
 // Keeps side bearings from painting into chrome padding or past the terminal inset.
-// cy1 <= 0 means "use full frame height".
+// cy1 <= 0 means "use full frame height". roundClip optionally clips to the rounded inset.
 func blitGlyphClipped(buf []byte, frameW int, dr image.Rectangle, mask image.Image, maskp image.Point, fg color.RGBA,
-	cx0, cy0, cx1, cy1 int) {
+	cx0, cy0, cx1, cy1 int, roundClip *renderCtx) {
 	if frameW <= 0 || len(buf) == 0 {
 		return
 	}
@@ -902,6 +1149,19 @@ func blitGlyphClipped(buf []byte, frameW int, dr image.Rectangle, mask image.Ima
 			}
 			if a == 0 {
 				continue
+			}
+			if roundClip != nil && roundClip.clipSet {
+				cov := roundRectCoverage(float64(px)+0.5, float64(py)+0.5,
+					roundClip.clipL, roundClip.clipT, roundClip.clipR, roundClip.clipB, roundClip.clipRad)
+				if cov <= 0 {
+					continue
+				}
+				if cov < 1 {
+					a = uint8(uint32(a) * uint32(cov*255+0.5) / 255) //nolint:gosec // G115: product fits uint32
+					if a == 0 {
+						continue
+					}
+				}
 			}
 			// Contrast boost: soft alpha → punchier stroke (closer to Kitty sharpness).
 			a = boostGlyphAlpha(a)

@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const osWindows = "windows"
+
 // clipboardWrite puts text on the system clipboard.
 // On macOS prefer pbcopy — gogpu NSPasteboard writes often appear to succeed
 // while leaving the system pasteboard unchanged.
@@ -66,7 +68,7 @@ func clipboardWriteNative(text string) error {
 	switch {
 	case isMac:
 		cmd = exec.Command("pbcopy")
-	case runtime.GOOS == "windows":
+	case runtime.GOOS == osWindows:
 		cmd = exec.Command("clip")
 	default:
 		if _, err := exec.LookPath("wl-copy"); err == nil {
@@ -91,7 +93,7 @@ func clipboardReadNative() (string, error) {
 	switch {
 	case isMac:
 		cmd = exec.Command("pbpaste")
-	case runtime.GOOS == "windows":
+	case runtime.GOOS == osWindows:
 		cmd = exec.Command("powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw")
 	default:
 		if _, err := exec.LookPath("wl-paste"); err == nil {

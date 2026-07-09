@@ -11,6 +11,7 @@ import (
 	"golang.org/x/image/font"
 
 	"github.com/termizard/termizard/internal/adapter"
+	"github.com/termizard/termizard/internal/core/pty"
 	"github.com/termizard/termizard/internal/core/terminal"
 	"github.com/termizard/termizard/internal/core/vte"
 )
@@ -24,9 +25,16 @@ type tabSlot struct {
 	parseMu sync.Mutex
 
 	// PTY callbacks — set once before any goroutine access.
-	keyFn    func(adapter.KeyEvent)
-	resizeFn func(adapter.ResizeEvent)
-	closePTY func()
+	keyFn      func(adapter.KeyEvent)
+	resizeFn   func(adapter.ResizeEvent)
+	refreshPTY func() // force SIGWINCH at current size (tmux status bar after clear)
+	pokePTY    func() // refreshPTY + follow-up SIGWINCHs and redraw
+	closePTY   func()
+
+	needsPTY bool // true until onDraw spawns the shell at the final grid size
+
+	ptyW, ptyH uint16      // last cols/rows sent to the kernel PTY (skip redundant SIGWINCH)
+	ptyReady   atomic.Bool // false until spawnTabPTY returns; defers redraw from read loop
 
 	dirty        atomic.Bool
 	pendingTitle atomic.Pointer[string] // VTE → OnUpdate (main thread)
@@ -49,11 +57,52 @@ func newTabSlot(cols, rows, scrollback int, reflow bool) *tabSlot {
 // write feeds raw PTY bytes through the VTE parser and marks the slot dirty.
 // Safe to call from any goroutine.
 func (t *tabSlot) write(data []byte) {
+	before := t.term.RepaintGen()
 	t.parseMu.Lock()
 	t.parser.Advance(t.term, data)
-	t.dirty.Store(true)
 	t.parseMu.Unlock()
 	t.scrollOffset.Store(0)
+	t.dirty.Store(true)
+	if t.term.RepaintGen() != before {
+		if fn := t.pokePTY; fn != nil {
+			fn()
+		} else {
+			refreshPTYSize(t)
+		}
+	}
+}
+
+// refreshPTYSize delivers SIGWINCH at the current grid size even when unchanged.
+// tmux and similar programs only redraw the status bar after a resize notification.
+func refreshPTYSize(tab *tabSlot) {
+	if tab == nil || tab.needsPTY {
+		return
+	}
+	if fn := tab.refreshPTY; fn != nil {
+		fn()
+		return
+	}
+	cols, rows := tab.term.Cols(), tab.term.Rows()
+	if cols < 1 || rows < 1 {
+		return
+	}
+	tab.ptyW = 0
+	tab.ptyH = 0
+	if fn := tab.resizeFn; fn != nil {
+		togglePTYResize(fn, cols, rows)
+	}
+}
+
+// togglePTYResize sends two winsize updates (r-1 then r) so tmux redraws immediately.
+func togglePTYResize(fn func(adapter.ResizeEvent), cols, rows int) {
+	if fn == nil {
+		return
+	}
+	c, r := pty.ClampSize(cols, rows)
+	if r > 2 {
+		fn(adapter.ResizeEvent{Cols: c, Rows: r - 1})
+	}
+	fn(adapter.ResizeEvent{Cols: c, Rows: r})
 }
 
 // sendInput delivers bytes to the PTY.
@@ -88,6 +137,10 @@ type winState struct {
 	// keyHandled suppresses the next OnTextInput event after a shortcut is consumed.
 	// Accessed on the main thread only (event-loop thread).
 	keyHandled bool
+	// suppressLeakT drops a single leaked "t" TextInput after Cmd/Ctrl+T (macOS).
+	suppressLeakT bool
+	// tabHoverLock hides hover highlight until the pointer moves in the tab bar.
+	tabHoverLock bool
 
 	// Double-click detection (main thread only).
 	lastClickTime time.Time
@@ -139,6 +192,7 @@ type winState struct {
 	lastTabTitles    []string // last painted tab labels (detect OSC title changes)
 	lastTabScrollX   int
 	lastHoverTabIdx  int
+	lastTabBarShown  bool
 	pendingGC        bool
 
 	// GPU resources — guarded by mu.
@@ -150,6 +204,8 @@ type winState struct {
 	frameH   int
 	lastCols int
 	lastRows int
+
+	layoutInProgress bool // suppress onDraw PTY resize during addNewTab spawn
 
 	// gogpu window handle.
 	win *gogpulib.Window
@@ -172,6 +228,16 @@ func newWinState(cols, rows, scrollback int, reflow bool) (*winState, *tabSlot) 
 	}
 	ws.blinkOn.Store(true)
 	return ws, tab
+}
+
+// shellTab returns the tab wired to app.New's primary PTY (always index 0).
+// Output from that PTY must not follow activeTabIdx — otherwise SIGWINCH redraw
+// from tab 0 lands on whichever tab is focused (duplicate prompt on first Cmd+T).
+func (ws *winState) shellTab() *tabSlot {
+	if len(ws.tabs) > 0 {
+		return ws.tabs[0]
+	}
+	return nil
 }
 
 // activeTab returns the current tab. Must be called with mu held when accessed
@@ -374,6 +440,22 @@ func shortenTabTitle(title string) string {
 		return title
 	}
 	return "…" + string(runes[len(runes)-maxRunes:])
+}
+
+// physicalFrameSize returns the framebuffer size in device pixels. When the
+// platform window is not ready (0×0), falls back to the last cached size from onDraw.
+func (ws *winState) physicalFrameSize() (int, int) {
+	if ws.win != nil {
+		if fw, fh := ws.win.PhysicalSize(); fw > 0 && fh > 0 {
+			return fw, fh
+		}
+	}
+	return ws.frameW, ws.frameH
+}
+
+func (ws *winState) hasFrameSize() bool {
+	fw, fh := ws.physicalFrameSize()
+	return fw > 0 && fh > 0
 }
 
 // destroyTex releases the GPU texture. Must be called with mu held.

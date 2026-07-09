@@ -309,6 +309,7 @@ func TestScrollUpDown(t *testing.T) {
 
 func TestEraseDisplayBelowAndScrollback(t *testing.T) {
 	term := newTerm(5, 3)
+	before := term.ScrollGen()
 	feed(t, term, "AAAAA\r\nBBBBB\r\nCCCCC")
 	feed(t, term, "\x1b[2;1H") // row 1 col 0
 	feed(t, term, "\x1b[0J")   // ED 0: below cursor (inclusive)
@@ -318,13 +319,32 @@ func TestEraseDisplayBelowAndScrollback(t *testing.T) {
 	if c := cellAt(t, term, 2, 0); c.Char != ' ' {
 		t.Fatalf("ED0 row2 should be erased")
 	}
+	if term.ScrollGen() != before {
+		t.Fatalf("ED0 should not bump ScrollGen")
+	}
+
+	feed(t, term, "\x1b[2J") // ED 2: full erase
+	if term.ScrollGen() != before+1 {
+		t.Fatalf("ED2 ScrollGen = %d, want %d", term.ScrollGen(), before+1)
+	}
+	if term.RepaintGen() != 1 {
+		t.Fatalf("ED2 RepaintGen = %d, want 1", term.RepaintGen())
+	}
+	beforeRepaint := term.RepaintGen()
 
 	for i := 0; i < 5; i++ {
 		feed(t, term, "line\r\n")
 	}
+	before = term.ScrollGen()
 	feed(t, term, "\x1b[3J") // erase display + scrollback
 	if term.ScrollbackLen() != 0 {
 		t.Fatalf("scrollback = %d, want 0 after ED3", term.ScrollbackLen())
+	}
+	if term.ScrollGen() != before+1 {
+		t.Fatalf("ED3 ScrollGen = %d, want %d", term.ScrollGen(), before+1)
+	}
+	if term.RepaintGen() != beforeRepaint+1 {
+		t.Fatalf("ED3 RepaintGen = %d, want %d", term.RepaintGen(), beforeRepaint+1)
 	}
 }
 
