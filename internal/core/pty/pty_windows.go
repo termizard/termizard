@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -19,19 +20,31 @@ import (
 
 const procThreadAttributePseudoConsole uintptr = 0x00020016
 
-type startupInfoEx struct {
-	windows.StartupInfo
-	lpAttributeList unsafe.Pointer
+var kernel32 = windows.NewLazySystemDLL("kernel32.dll")
+var procPeekNamedPipe = kernel32.NewProc("PeekNamedPipe")
+
+func peekNamedPipe(handle windows.Handle, totalBytesAvail *uint32) error {
+	r1, _, err := procPeekNamedPipe.Call(
+		uintptr(handle),
+		0, 0, 0,
+		uintptr(unsafe.Pointer(totalBytesAvail)),
+		0,
+	)
+	if r1 == 0 {
+		return err
+	}
+	return nil
 }
 
 type windowsPTY struct {
 	hPC      windows.Handle
-	rPipe    *os.File
-	wPipe    *os.File
+	rHandle  windows.Handle // childOutRead — we read PTY output from here
+	wPipe    *os.File       // childInWrite — we send keystrokes here
 	proc     windows.Handle
 	pid      uint32
 	attrList *windows.ProcThreadAttributeListContainer
 	once     sync.Once
+	closedCh chan struct{}
 }
 
 func Open(cfg Config) (PTY, error) {
@@ -56,47 +69,52 @@ func Open(cfg Config) (PTY, error) {
 		return nil, fmt.Errorf("pty: CreatePipe(in): %w", err)
 	}
 
-	var hPC windows.Handle
-	coord := windows.Coord{X: int16(cfg.Cols), Y: int16(cfg.Rows)}
-	if err := windows.CreatePseudoConsole(coord, childInRead, childOutWrite, 0, &hPC); err != nil {
+	cleanupPipes := func() {
 		windows.CloseHandle(childOutRead)
 		windows.CloseHandle(childOutWrite)
 		windows.CloseHandle(childInRead)
 		windows.CloseHandle(childInWrite)
+	}
+
+	// Pass HPCON by value to UpdateProcThreadAttribute (MS EchoCon / go-pty form).
+	// Passing &hPC (pointer-to-handle) causes STATUS_DLL_INIT_FAILED (0xC0000142).
+	var hPC windows.Handle
+	coord := windows.Coord{X: int16(cfg.Cols), Y: int16(cfg.Rows)}
+	if err := windows.CreatePseudoConsole(coord, childInRead, childOutWrite, 0, &hPC); err != nil {
+		cleanupPipes()
 		return nil, fmt.Errorf("pty: CreatePseudoConsole: %w", err)
 	}
-	windows.CloseHandle(childInRead)
-	windows.CloseHandle(childOutWrite)
 
 	attrList, err := windows.NewProcThreadAttributeList(1)
 	if err != nil {
 		windows.ClosePseudoConsole(hPC)
-		windows.CloseHandle(childOutRead)
-		windows.CloseHandle(childInWrite)
+		cleanupPipes()
 		return nil, fmt.Errorf("pty: NewProcThreadAttributeList: %w", err)
 	}
 	if err := attrList.Update(
 		procThreadAttributePseudoConsole,
-		unsafe.Pointer(&hPC),
+		unsafe.Pointer(hPC),
 		unsafe.Sizeof(hPC),
 	); err != nil {
 		attrList.Delete()
 		windows.ClosePseudoConsole(hPC)
-		windows.CloseHandle(childOutRead)
-		windows.CloseHandle(childInWrite)
+		cleanupPipes()
 		return nil, fmt.Errorf("pty: UpdateProcThreadAttribute: %w", err)
 	}
 
-	var siex startupInfoEx
-	siex.Cb = uint32(unsafe.Sizeof(siex))
-	siex.lpAttributeList = unsafe.Pointer(attrList.List())
+	siEx := &windows.StartupInfoEx{}
+	siEx.Cb = uint32(unsafe.Sizeof(*siEx))
+	// Null std handles + STARTF_USESTDHANDLES prevents the child from inheriting
+	// the parent's console handles (e.g. when launched via `go run` from PowerShell),
+	// which conflicts with ConPTY attachment.
+	siEx.Flags = windows.STARTF_USESTDHANDLES
+	siEx.ProcThreadAttributeList = attrList.List()
 
 	cmdLine, err := windows.UTF16PtrFromString(makeCmdLine(command))
 	if err != nil {
 		attrList.Delete()
 		windows.ClosePseudoConsole(hPC)
-		windows.CloseHandle(childOutRead)
-		windows.CloseHandle(childInWrite)
+		cleanupPipes()
 		return nil, fmt.Errorf("pty: encode cmdline: %w", err)
 	}
 
@@ -104,8 +122,7 @@ func Open(cfg Config) (PTY, error) {
 	if err != nil {
 		attrList.Delete()
 		windows.ClosePseudoConsole(hPC)
-		windows.CloseHandle(childOutRead)
-		windows.CloseHandle(childInWrite)
+		cleanupPipes()
 		return nil, fmt.Errorf("pty: encode dir: %w", err)
 	}
 
@@ -113,32 +130,33 @@ func Open(cfg Config) (PTY, error) {
 	if err != nil {
 		attrList.Delete()
 		windows.ClosePseudoConsole(hPC)
-		windows.CloseHandle(childOutRead)
-		windows.CloseHandle(childInWrite)
+		cleanupPipes()
 		return nil, fmt.Errorf("pty: encode env: %w", err)
 	}
 
-	var procInfo windows.ProcessInformation
+	// CREATE_NO_WINDOW / DETACHED_PROCESS / CREATE_NEW_CONSOLE are forbidden with ConPTY.
 	creationFlags := uint32(
 		windows.EXTENDED_STARTUPINFO_PRESENT |
-			windows.CREATE_UNICODE_ENVIRONMENT |
-			windows.CREATE_NO_WINDOW,
+			windows.CREATE_UNICODE_ENVIRONMENT,
 	)
-	// lpApplicationName must be nil for ConPTY — passing the image path breaks
-	// pseudoconsole attachment while the child process still appears to start.
+	var procInfo windows.ProcessInformation
 	if err := windows.CreateProcess(
 		nil, cmdLine, nil, nil, false,
 		creationFlags, envBlock, dirUTF16,
-		(*windows.StartupInfo)(unsafe.Pointer(&siex)),
+		&siEx.StartupInfo,
 		&procInfo,
 	); err != nil {
 		attrList.Delete()
 		windows.ClosePseudoConsole(hPC)
-		windows.CloseHandle(childOutRead)
-		windows.CloseHandle(childInWrite)
+		cleanupPipes()
 		return nil, fmt.Errorf("pty: CreateProcess %q: %w", command[0], err)
 	}
 	windows.CloseHandle(procInfo.Thread)
+
+	// MS sample: close the pipe ends given to CreatePseudoConsole after the child starts.
+	// ConPTY has duplicated them; keeping our copies open is unnecessary.
+	windows.CloseHandle(childInRead)
+	windows.CloseHandle(childOutWrite)
 
 	if err := windows.ResizePseudoConsole(hPC, coord); err != nil {
 		logger.Get().Warn("pty initial resize failed",
@@ -157,17 +175,55 @@ func Open(cfg Config) (PTY, error) {
 
 	return &windowsPTY{
 		hPC:      hPC,
-		rPipe:    os.NewFile(uintptr(childOutRead), "pty-out"),
+		rHandle:  childOutRead,
 		wPipe:    os.NewFile(uintptr(childInWrite), "pty-in"),
 		proc:     procInfo.Process,
 		pid:      procInfo.ProcessId,
 		attrList: attrList,
+		closedCh: make(chan struct{}),
 	}, nil
 }
 
-func (p *windowsPTY) Read(buf []byte) (int, error)  { return p.rPipe.Read(buf) }
+// Read polls the output pipe using PeekNamedPipe and reads when data is
+// available. Polling avoids a blocking ReadFile call that would prevent
+// clean shutdown via closedCh.
+func (p *windowsPTY) Read(buf []byte) (int, error) {
+	const pollMs = 5
+	for {
+		select {
+		case <-p.closedCh:
+			return 0, io.EOF
+		default:
+		}
+
+		var avail uint32
+		if err := peekNamedPipe(p.rHandle, &avail); err != nil {
+			if err == windows.ERROR_BROKEN_PIPE || err == windows.ERROR_PIPE_NOT_CONNECTED {
+				return 0, io.EOF
+			}
+			return 0, err
+		}
+		if avail > 0 {
+			toRead := uint32(len(buf))
+			if avail < toRead {
+				toRead = avail
+			}
+			var n uint32
+			if err := windows.ReadFile(p.rHandle, buf[:toRead], &n, nil); err != nil {
+				if err == windows.ERROR_BROKEN_PIPE {
+					return int(n), io.EOF
+				}
+				return int(n), err
+			}
+			return int(n), nil
+		}
+
+		time.Sleep(pollMs * time.Millisecond)
+	}
+}
+
 func (p *windowsPTY) Write(buf []byte) (int, error) { return p.wPipe.Write(buf) }
-func (p *windowsPTY) Fd() uintptr                   { return uintptr(p.rPipe.Fd()) }
+func (p *windowsPTY) Fd() uintptr                   { return uintptr(p.rHandle) }
 func (p *windowsPTY) Pid() int                      { return int(p.pid) }
 
 func (p *windowsPTY) Resize(cols, rows uint16) error {
@@ -203,6 +259,7 @@ func (p *windowsPTY) Wait() error {
 
 func (p *windowsPTY) Close() (err error) {
 	p.once.Do(func() {
+		close(p.closedCh)
 		if termErr := windows.TerminateProcess(p.proc, 1); termErr != nil {
 			logger.Get().Warn("pty terminate failed",
 				slog.Uint64("pid", uint64(p.pid)),
@@ -210,7 +267,7 @@ func (p *windowsPTY) Close() (err error) {
 			)
 		}
 		windows.CloseHandle(p.proc)
-		p.rPipe.Close()
+		windows.CloseHandle(p.rHandle)
 		p.wPipe.Close()
 		windows.ClosePseudoConsole(p.hPC)
 		if p.attrList != nil {

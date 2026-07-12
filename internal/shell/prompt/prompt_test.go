@@ -74,3 +74,17 @@ func TestApplyEnvPowerShellSetsProfile(t *testing.T) {
 		t.Fatalf("expected TERMIZARD_PS_PROFILE, got %v", env)
 	}
 }
+
+func TestPowerShellTitlePath(t *testing.T) {
+	path, err := prompt.PowerShellTitlePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "]0;") || !strings.Contains(string(data), "$PWD") {
+		t.Fatalf("title.ps1 missing OSC cwd markers: %q", data)
+	}
+}

@@ -73,9 +73,18 @@ enabled = false
 [shell]
 # program = "/bin/zsh"
 # args = ["-l"]
-# Windows example:
+#
+# Windows (ConPTY). Default order when program is unset:
+#   pwsh.exe → powershell.exe → cmd.exe
+# Git Bash $SHELL is ignored on Windows.
+# PowerShell sessions publish $PWD to the window/tab title (stock PS prompt kept).
 # program = "pwsh.exe"
 # args = []
+# program = "powershell.exe"
+# args = []
+# program = "cmd.exe"
+# args = []
+#
 # no_oh_my_zsh = true   # bare zsh in termizard (does not touch ~/.zshrc)
 # prompt = "kali"       # Kali twoline layout when no_oh_my_zsh | none
 #

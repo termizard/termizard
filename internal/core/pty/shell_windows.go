@@ -51,10 +51,10 @@ func windowsShellCandidates() []string {
 	if sysRoot == "" {
 		sysRoot = `C:\Windows`
 	}
-	// cmd.exe before legacy Windows PowerShell (PS 5): cmd.exe starts faster
-	// and is more reliable under ConPTY than the inbox powershell.exe.
-	add(filepath.Join(sysRoot, "System32", "cmd.exe"))
+	// Inbox PowerShell (PS 5) before cmd.exe: users expect a PowerShell
+	// experience. Fall back to cmd.exe only when PS 5 is not present.
 	add(filepath.Join(sysRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
+	add(filepath.Join(sysRoot, "System32", "cmd.exe"))
 
 	if comspec := os.Getenv("COMSPEC"); comspec != "" {
 		add(comspec)

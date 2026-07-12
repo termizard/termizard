@@ -14,7 +14,7 @@ const (
 	StyleNone = "none"
 )
 
-//go:embed embed/zsh/.zshrc embed/kali-prompt.zsh embed/bash/bashrc embed/powershell/profile.ps1
+//go:embed embed/zsh/.zshrc embed/kali-prompt.zsh embed/bash/bashrc embed/powershell/profile.ps1 embed/powershell/title.ps1
 var embedded embed.FS
 
 // Materialize writes bundled prompt files to the user cache dir.
@@ -40,7 +40,7 @@ func Materialize() (zshDir, bashRC string, err error) {
 	return zshDir, bashRC, nil
 }
 
-// PowerShellProfilePath returns the materialized PowerShell prompt script path.
+// PowerShellProfilePath returns the materialized PowerShell kali-style prompt script path.
 func PowerShellProfilePath() (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -48,6 +48,20 @@ func PowerShellProfilePath() (string, error) {
 	}
 	dst := filepath.Join(base, "termizard", "prompt", "powershell", "profile.ps1")
 	if err := writeEmbedded("embed/powershell/profile.ps1", dst); err != nil {
+		return "", err
+	}
+	return dst, nil
+}
+
+// PowerShellTitlePath returns a minimal profile that only publishes $PWD via OSC 0/2
+// while keeping the stock `PS C:\...>` prompt text.
+func PowerShellTitlePath() (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("prompt: cache dir: %w", err)
+	}
+	dst := filepath.Join(base, "termizard", "prompt", "powershell", "title.ps1")
+	if err := writeEmbedded("embed/powershell/title.ps1", dst); err != nil {
 		return "", err
 	}
 	return dst, nil
@@ -87,7 +101,7 @@ func ApplyEnv(base []string, shellPath, style string) ([]string, error) {
 }
 
 func shellBase(shellPath string) string {
-	base := filepath.Base(shellPath)
+	base := filepath.Base(strings.ReplaceAll(shellPath, `\`, `/`))
 	if i := strings.LastIndex(base, "-"); i >= 0 {
 		base = base[i+1:]
 	}

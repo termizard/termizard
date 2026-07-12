@@ -14,6 +14,7 @@ import (
 	"github.com/termizard/termizard/internal/core/pty"
 	"github.com/termizard/termizard/internal/core/terminal"
 	"github.com/termizard/termizard/internal/core/vte"
+	"github.com/termizard/termizard/internal/util/logger"
 )
 
 // tabSlot holds the terminal, parser and PTY state for one tab inside a window.
@@ -108,7 +109,10 @@ func togglePTYResize(fn func(adapter.ResizeEvent), cols, rows int) {
 // sendInput delivers bytes to the PTY.
 func (t *tabSlot) sendInput(data []byte) {
 	if fn := t.keyFn; fn != nil {
+		logger.Get().Debug("pty input", "bytes", len(data))
 		fn(adapter.KeyEvent{Data: data})
+	} else {
+		logger.Get().Warn("sendInput: keyFn is nil, input dropped", "bytes", len(data))
 	}
 }
 
@@ -415,21 +419,27 @@ func tabIndexAtX(physX, frameW, inset, numTabs, cellW int, scaleFactor float64, 
 	return idx
 }
 
-// shortenTabTitle mirrors Wails path display: keep a readable trailing segment.
+// shortenTabTitle keeps a readable trailing segment of a path or process title.
 func shortenTabTitle(title string) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return "~"
 	}
-	// Prefer basename for absolute paths / long cwd titles.
-	if strings.Contains(title, "/") || strings.Contains(title, `\`) {
-		base := filepath.Base(title)
-		if base != "" && base != "." && base != string(filepath.Separator) {
-			// Keep more context when the shell title is a long path:
-			// ".../parent/base" style like the Wails frontend screenshot.
-			parent := filepath.Base(filepath.Dir(title))
-			if parent != "" && parent != "." && parent != string(filepath.Separator) {
-				return "…/" + parent + "/" + base
+	sep := string(filepath.Separator)
+	// Normalize mixed separators so filepath.Base/Dir work on Windows titles
+	// that arrive with forward slashes (or vice versa).
+	var norm string
+	if sep == `\` {
+		norm = strings.ReplaceAll(title, `/`, `\`)
+	} else {
+		norm = strings.ReplaceAll(title, `\`, `/`)
+	}
+	if strings.Contains(norm, sep) {
+		base := filepath.Base(norm)
+		if base != "" && base != "." && base != sep {
+			parent := filepath.Base(filepath.Dir(norm))
+			if parent != "" && parent != "." && parent != sep {
+				return "…" + sep + parent + sep + base
 			}
 			return base
 		}

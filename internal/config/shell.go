@@ -23,6 +23,11 @@ func (cfg *Config) ShellCommand() []string {
 	if cfg.Shell.NoOhMyZsh {
 		cmd = withoutOhMyZsh(cmd)
 	}
+	// On Windows, default PowerShell does not emit OSC cwd titles. Inject a
+	// minimal title.ps1 so tabs/window match the path shown in `PS C:\...>`.
+	if runtime.GOOS == goosWindows {
+		cmd = withPowerShellCwdTitle(cmd)
+	}
 	return cmd
 }
 
@@ -78,8 +83,12 @@ func (cfg *Config) usesBundledPrompt() bool {
 }
 
 const (
-	shellZsh = "zsh"
-	psNoLogo = "-NoLogo"
+	shellZsh        = "zsh"
+	shellPowerShell = "powershell"
+	shellPwsh       = "pwsh"
+	psNoLogo        = "-NoLogo"
+	psNoExit        = "-NoExit"
+	psFile          = "-File"
 )
 
 func withBundledShell(cmd []string, bashRC, psProfile string) []string {
@@ -91,7 +100,7 @@ func withBundledShell(cmd []string, bashRC, psProfile string) []string {
 		return withInteractiveZsh(cmd)
 	case "bash":
 		return withBundledBash(cmd, bashRC)
-	case "pwsh", "powershell":
+	case shellPwsh, shellPowerShell:
 		return withBundledPowerShell(cmd, psProfile)
 	default:
 		return withoutOhMyZsh(cmd)
@@ -117,12 +126,38 @@ func withBundledBash(cmd []string, rcPath string) []string {
 func withBundledPowerShell(cmd []string, psProfile string) []string {
 	if psProfile != "" {
 		return []string{
-			cmd[0], psNoLogo, "-NoExit",
+			cmd[0], psNoLogo, psNoExit,
 			"-ExecutionPolicy", "Bypass",
-			"-File", psProfile,
+			psFile, psProfile,
 		}
 	}
-	return append([]string{cmd[0], psNoLogo, "-NoExit"}, cmd[1:]...)
+	return append([]string{cmd[0], psNoLogo, psNoExit}, cmd[1:]...)
+}
+
+// withPowerShellCwdTitle injects title.ps1 for pwsh/powershell so OSC 0/2
+// carries $PWD (ignored for non-PowerShell argv).
+func withPowerShellCwdTitle(cmd []string) []string {
+	if len(cmd) == 0 {
+		return cmd
+	}
+	switch shellBase(cmd[0]) {
+	case shellPwsh, shellPowerShell:
+	default:
+		return cmd
+	}
+	// Already using an explicit -File / -Command (e.g. kali profile).
+	if hasArg(cmd[1:], psFile) || hasArg(cmd[1:], "-Command") || hasArg(cmd[1:], "-c") {
+		return cmd
+	}
+	titlePS1, err := prompt.PowerShellTitlePath()
+	if err != nil || titlePS1 == "" {
+		return cmd
+	}
+	return []string{
+		cmd[0], psNoLogo, psNoExit,
+		"-ExecutionPolicy", "Bypass",
+		psFile, titlePS1,
+	}
 }
 
 func withoutOhMyZsh(cmd []string) []string {
@@ -142,7 +177,7 @@ func withoutOhMyZsh(cmd []string) []string {
 }
 
 func shellBase(shellPath string) string {
-	base := filepath.Base(shellPath)
+	base := filepath.Base(strings.ReplaceAll(shellPath, `\`, `/`))
 	if i := strings.LastIndex(base, "-"); i >= 0 {
 		base = base[i+1:]
 	}

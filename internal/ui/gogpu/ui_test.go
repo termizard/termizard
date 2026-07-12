@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -366,6 +367,49 @@ func TestNotifyShellError(t *testing.T) {
 	}
 }
 
+func TestNormalizeOSCTitleExePath(t *testing.T) {
+	got := normalizeOSCTitle(`C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe`)
+	if got != "" {
+		t.Fatalf("powershell.exe path = %q, want ignored empty", got)
+	}
+	got = normalizeOSCTitle(`C:/Program Files/PowerShell/7/pwsh.exe`)
+	if got != "" {
+		t.Fatalf("pwsh.exe path = %q, want ignored empty", got)
+	}
+	got = normalizeOSCTitle(`C:\Windows\System32\cmd.exe`)
+	if got != "" {
+		t.Fatalf("cmd.exe = %q, want ignored empty", got)
+	}
+	got = normalizeOSCTitle(`C:\Users\myako\Documents`)
+	if got != `C:\Users\myako\Documents` {
+		t.Fatalf("cwd title mutated: %q", got)
+	}
+	got = normalizeOSCTitle("  ~/projects  ")
+	if got != "~/projects" {
+		t.Fatalf("cwd tilde = %q", got)
+	}
+}
+
+func TestStartupCwdTitle(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home")
+	}
+	got := startupCwdTitle()
+	if got == "" {
+		t.Fatal("startupCwdTitle empty")
+	}
+}
+
+func TestShellDisplayName(t *testing.T) {
+	if got := shellDisplayName(`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`); got != "PowerShell" {
+		t.Fatalf("got %q", got)
+	}
+	if got := shellDisplayName("/bin/zsh"); got != "zsh" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestWireTabTitleStoresPending(t *testing.T) {
 	u, _ := testUI(t)
 	tab := newTabSlot(80, 24, 100, true)
@@ -492,7 +536,9 @@ func TestHandleScrollLineMode(t *testing.T) {
 		tab.write([]byte("line\r\n"))
 	}
 	before := tab.scrollOffset.Load()
+	_, termY := termPointerXY(u, ws, 0, 0)
 	u.handleScroll(ws, gpucontext.ScrollEvent{
+		Y:         termY,
 		DeltaY:    -1,
 		DeltaMode: gpucontext.ScrollDeltaLine,
 	})
@@ -507,7 +553,9 @@ func TestHandleScrollPageMode(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		tab.write([]byte("x\r\n"))
 	}
+	_, termY := termPointerXY(u, ws, 0, 0)
 	u.handleScroll(ws, gpucontext.ScrollEvent{
+		Y:         termY,
 		DeltaY:    -1,
 		DeltaMode: gpucontext.ScrollDeltaPage,
 	})

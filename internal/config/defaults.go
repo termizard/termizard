@@ -31,11 +31,11 @@ func Defaults() *Config {
 			ShowTitleBar:  true,
 		},
 		Tabs: TabsConfig{
-			Enabled:        false,
+			Enabled:        true,
 			Label:          TabLabelPath,
 			Size:           TabSizeCompact,
 			ShowNewButton:  true,
-			ShowWhenSingle: false,
+			ShowWhenSingle: true,
 		},
 		Terminal: TerminalConfig{
 			InitialCols:    80,

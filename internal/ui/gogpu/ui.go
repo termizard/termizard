@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -24,6 +25,11 @@ import (
 const osDarwin = "darwin"
 
 var isMac = runtime.GOOS == osDarwin
+
+// isWindows enables Windows-specific rendering behavior. On Windows,
+// RequestRedraw called from goroutines is silently dropped by the Win32/DXGI
+// message pump; continuous rendering is used as the workaround.
+var isWindows = runtime.GOOS == osWindows
 
 const (
 	defaultTitle    = "termizard"
@@ -73,6 +79,16 @@ type UI struct {
 
 	// stopPoll signals background goroutines to exit.
 	stopPoll chan struct{}
+
+	// perWindowKeyPressed / perWindowTextInputed prevent EventSource from
+	// double-dispatching events already handled by a per-window callback.
+	// Two separate flags are required: if a single shared flag is used, the
+	// KeyPress handler on Windows sets it and the following EventSource
+	// OnTextInput callback sees it true and silently drops the character.
+	// Each flag is consumed only by the matching EventSource event type.
+	// Main-thread-only — no synchronization needed.
+	perWindowKeyPressed  bool
+	perWindowTextInputed bool
 }
 
 func gpuDebug() bool { return os.Getenv("TERMIZARD_GPU_DEBUG") != "" }
@@ -140,7 +156,7 @@ func New(cfg *config.Config) *UI {
 		WithSize(w, h).
 		WithMinSize(minW, minH).
 		WithResizable(true).
-		WithContinuousRender(false).
+		WithContinuousRender(isWindows). // on Windows, goroutine RequestRedraw is dropped by Win32 pump
 		WithVSync(true).
 		WithHeaderAlignment(headerAlignmentForConfig(cfg))
 
@@ -451,7 +467,7 @@ func clampTabScroll(scroll, maxScroll int) int {
 // wireTabTitle registers OSC 0/2 title updates for a tab (path or running process).
 func (u *UI) wireTabTitle(tab *tabSlot) {
 	tab.term.SetOnTitle(func(title string) {
-		title = strings.TrimSpace(title)
+		title = normalizeOSCTitle(title)
 		if title == "" {
 			return
 		}
@@ -542,6 +558,9 @@ func (u *UI) Run() error {
 
 		u.primary.mu.Lock()
 		primaryTab := u.primary.tabs[0]
+		if u.keyFn == nil {
+			logger.Get().Warn("OnSurfaceAvailable: keyFn is nil — primary tab will not send input to PTY")
+		}
 		primaryTab.keyFn = u.keyFn
 		primaryTab.resizeFn = u.resizeFn
 		primaryTab.refreshPTY = func() {
@@ -558,6 +577,15 @@ func (u *UI) Run() error {
 		}
 		primaryTab.pokePTY = func() { u.pokePTYRefresh(primaryTab) }
 		u.wireTabTitle(primaryTab)
+		// Set an initial tab title from the configured shell name so the tab
+		// shows something useful before PowerShell (or any shell) emits its
+		// first OSC 0/2 sequence.
+		// Initial tab title = starting cwd (matches the path inside the prompt).
+		if primaryTab.pendingTitle.Load() == nil {
+			if cwd := startupCwdTitle(); cwd != "" {
+				primaryTab.pendingTitle.Store(&cwd)
+			}
+		}
 		u.primary.mu.Unlock()
 
 		u.sessLock.Lock()
@@ -573,7 +601,88 @@ func (u *UI) Run() error {
 		}
 	})
 
+	// Use EventSource for keyboard on all platforms.
+	// Per-window SetOnKeyPress/SetOnTextInput silently drop events on Linux because
+	// Wayland/X11 key events have WindowID=0, causing getByPlatformID to return nil.
+	// EventSource dispatches unconditionally regardless of WindowID (the Kitty pattern:
+	// own the input event loop rather than delegating to a per-surface callback chain).
+	src := u.app.EventSource()
+	src.OnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		// Skip if a per-window SetOnKeyPress callback already fired for this event.
+		if u.perWindowKeyPressed {
+			u.perWindowKeyPressed = false
+			return
+		}
+		u.handleKeyPress(u.primary, key, mods)
+	})
+	src.OnTextInput(func(s string) {
+		// Skip if a per-window SetOnTextInput callback already fired for this event.
+		// NOTE: only the TextInput flag is checked here — never the KeyPress flag.
+		// On Windows, SetOnKeyPress fires before WM_CHAR; using a shared flag would
+		// cause EventSource to drop the following TextInput (character lost silently).
+		if u.perWindowTextInputed {
+			u.perWindowTextInputed = false
+			return
+		}
+		u.handleTextInput(u.primary, s)
+	})
+	// On Linux, pointer and scroll events also carry WindowID=0, so per-window
+	// callbacks (win.SetOnPointer/SetOnScroll) are never invoked. Route via EventSource.
+	// Windows and macOS use per-window callbacks (wireWindow), so we only add EventSource
+	// routing for Linux to avoid double-dispatch on those platforms.
+	// OnPointer and OnScrollEvent are on sub-interfaces; type-assert to check availability.
+	if runtime.GOOS == "linux" {
+		if psrc, ok := src.(gpucontext.PointerEventSource); ok {
+			psrc.OnPointer(func(ev gpucontext.PointerEvent) {
+				u.handlePointer(u.primary, ev)
+			})
+		}
+		if ssrc, ok := src.(gpucontext.ScrollEventSource); ok {
+			ssrc.OnScrollEvent(func(ev gpucontext.ScrollEvent) {
+				u.handleScroll(u.primary, ev)
+			})
+		}
+	}
+
 	return u.app.Run()
+}
+
+// handleTextInput processes a text-input event for ws.
+// Called from the global EventSource.OnTextInput callback on all platforms.
+func (u *UI) handleTextInput(ws *winState, s string) {
+	logger.Get().Debug("textinput", "text", s, "keyHandled", ws.keyHandled)
+	u.debugf("textinput %q keyHandled=%v", s, ws.keyHandled)
+	// Suppress TextInput when a shortcut was consumed in the preceding KeyPress.
+	if ws.keyHandled {
+		ws.keyHandled = false
+		return
+	}
+	// macOS may deliver a leaked "t" after Cmd/Ctrl+T even when KeyPress was handled.
+	if ws.suppressLeakT && s == "t" {
+		ws.suppressLeakT = false
+		return
+	}
+	ws.suppressLeakT = false
+	if s == "" {
+		return
+	}
+	ws.mu.Lock()
+	entry := ws.activeTab()
+	if entry == nil {
+		ws.mu.Unlock()
+		return
+	}
+	entry.selActive = false
+	ws.mu.Unlock()
+
+	// Some platforms deliver paste as multi-rune TextInput (Wails uses ClipboardEvent).
+	if len([]rune(s)) > 1 {
+		u.pasteTextToTab(entry, s)
+		return
+	}
+
+	entry.scrollOffset.Store(0)
+	entry.sendInput([]byte(s))
 }
 
 // wireWindow attaches all per-window callbacks.
@@ -586,41 +695,24 @@ func (u *UI) wireWindow(win *gogpulib.Window, ws *winState) {
 	win.SetOnResize(func(_, _ int) {
 		u.app.RequestRedraw()
 	})
+	// Keyboard input strategy:
+	// Per-window callbacks are registered for all windows on all platforms.
+	// On Linux (Wayland/X11), key events carry WindowID=0 so getByPlatformID
+	// returns nil and dispatchKeyToWindow is silently skipped — these callbacks
+	// never fire on Linux. The EventSource (registered in Run) always fires
+	// unconditionally and is the actual input path on Linux.
+	// On Windows/macOS, per-window callbacks fire first; each sets its own typed
+	// flag so the corresponding EventSource callback skips re-dispatching the same
+	// event. KeyPress and TextInput use separate flags to prevent cross-event
+	// contamination (e.g. SetOnKeyPress firing before WM_CHAR must not cause
+	// EventSource.OnTextInput to drop the subsequent character).
 	win.SetOnKeyPress(func(key gpucontext.Key, mods gpucontext.Modifiers) {
+		u.perWindowKeyPressed = true
 		u.handleKeyPress(ws, key, mods)
 	})
 	win.SetOnTextInput(func(s string) {
-		// Suppress TextInput when a shortcut was consumed in the preceding KeyPress.
-		if ws.keyHandled {
-			ws.keyHandled = false
-			return
-		}
-		// macOS may deliver a leaked "t" after Cmd/Ctrl+T even when KeyPress was handled.
-		if ws.suppressLeakT && s == "t" {
-			ws.suppressLeakT = false
-			return
-		}
-		ws.suppressLeakT = false
-		if s == "" {
-			return
-		}
-		ws.mu.Lock()
-		entry := ws.activeTab()
-		if entry == nil {
-			ws.mu.Unlock()
-			return
-		}
-		entry.selActive = false
-		ws.mu.Unlock()
-
-		// Some platforms deliver paste as multi-rune TextInput (Wails uses ClipboardEvent).
-		if len([]rune(s)) > 1 {
-			u.pasteTextToTab(entry, s)
-			return
-		}
-
-		entry.scrollOffset.Store(0)
-		entry.sendInput([]byte(s))
+		u.perWindowTextInputed = true
+		u.handleTextInput(ws, s)
 	})
 	win.SetOnScroll(func(ev gpucontext.ScrollEvent) {
 		u.handleScroll(ws, ev)
@@ -672,7 +764,7 @@ func (u *UI) openNewWindow() {
 		WithSize(w, h).
 		WithMinSize(400, 240).
 		WithResizable(true).
-		WithContinuousRender(false).
+		WithContinuousRender(isWindows).
 		WithHeaderAlignment(headerAlignmentForConfig(u.cfg))
 
 	win, err := u.app.NewWindow(winCfg)
@@ -743,8 +835,9 @@ func (u *UI) spawnTabPTY(ws *winState, tab *tabSlot, winID gogpulib.WindowID, cl
 	}
 	ptyCols, ptyRows := pty.ClampSize(cols, rows)
 
+	cmd := u.cfg.ShellCommand()
 	p, ptyErr := pty.Open(pty.Config{
-		Command: u.cfg.ShellCommand(),
+		Command: cmd,
 		Cols:    ptyCols,
 		Rows:    ptyRows,
 		Env:     env,
@@ -755,6 +848,12 @@ func (u *UI) spawnTabPTY(ws *winState, tab *tabSlot, winID gogpulib.WindowID, cl
 		ws.dirty.Store(true)
 		u.app.RequestRedraw()
 		return
+	}
+
+	// Show the starting cwd immediately so the tab matches the shell prompt
+	// before the first OSC sequence arrives.
+	if cwd := startupCwdTitle(); cwd != "" {
+		tab.pendingTitle.Store(&cwd)
 	}
 
 	tab.ptyReady.Store(false)
@@ -967,6 +1066,7 @@ func (u *UI) Write(data []byte) (int, error) {
 		entry.write(data)
 		u.primary.dirty.Store(true)
 	}
+	logger.Get().Debug("pty output", "bytes", len(data))
 	if gpuDebug() {
 		fmt.Fprintf(os.Stderr, "termizard-gpu: write %d bytes\n", len(data))
 	}
@@ -1002,6 +1102,9 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	}
 	if fw <= 0 || fh <= 0 || ws.cellW <= 0 || ws.cellH <= 0 {
 		u.debugf("onDraw #%d skip: fw=%d fh=%d cell=%dx%d", n, fw, fh, ws.cellW, ws.cellH)
+		if n == 1 {
+			logger.Get().Warn("first onDraw skipped", "fw", fw, "fh", fh, "cellW", ws.cellW, "cellH", ws.cellH)
+		}
 		u.app.RequestRedraw()
 		return
 	}
@@ -1193,6 +1296,9 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 		ws.mu.Lock()
 		tabs := ws.tabs
 		ws.mu.Unlock()
+		if n == 1 {
+			logger.Get().Debug("first onDraw grid", "cols", newCols, "rows", newRows, "fw", fw, "fh", fh, "cellW", ws.cellW, "cellH", ws.cellH)
+		}
 		resizeTabsToGrid(tabs, newCols, newRows)
 	} else if tabSwitch && !layoutInProgress && !hadPendingPTY && (entry.term.Cols() != newCols || entry.term.Rows() != newRows) {
 		resizeTabsToGrid([]*tabSlot{entry}, newCols, newRows)
@@ -1341,11 +1447,15 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 		if err != nil {
 			ws.texErrCount++
 			u.debugf("onDraw #%d new tex err (%d): %v", n, ws.texErrCount, err)
-			if ws.texErrCount <= 10 {
-				u.app.RequestRedraw()
-			} else {
+			if ws.texErrCount == 1 || ws.texErrCount == 10 {
+				logger.Get().Warn("gogpu: texture allocation failed",
+					"consecutive", ws.texErrCount, "err", err)
+			} else if ws.texErrCount > 10 {
 				logger.Get().Error("gogpu: texture allocation failed repeatedly, giving up",
 					"consecutive", ws.texErrCount)
+			}
+			if ws.texErrCount <= 10 {
+				u.app.RequestRedraw()
 			}
 			if oldTex != nil {
 				oldTex.Destroy()
@@ -1357,6 +1467,7 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	} else if needUpdate {
 		if err := ws.tex.UpdateData(frame); err != nil {
 			u.debugf("onDraw #%d update err: %v", n, err)
+			logger.Get().Warn("gogpu: texture update failed", "err", err)
 			u.app.RequestRedraw()
 			return
 		}
@@ -1372,6 +1483,7 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	ctx.Clear(br, bgc, bb, 1)
 	if err := ctx.PresentTexture(ws.tex); err != nil {
 		u.debugf("onDraw #%d present err: %v", n, err)
+		logger.Get().Warn("gogpu: present texture failed", "err", err)
 		u.app.RequestRedraw()
 		if oldTex != nil {
 			oldTex.Destroy()
@@ -1505,10 +1617,15 @@ func (u *UI) handleKeyPress(ws *winState, key gpucontext.Key, mods gpucontext.Mo
 		return
 	}
 
+	// CapsLock and NumLock are always stripped for shortcut matching.
+	// On Windows, NumLock is typically on and would otherwise break every
+	// Ctrl+Shift+? comparison. This mirrors matchBinding's behavior.
+	cleanMods := mods &^ (gpucontext.ModCapsLock | gpucontext.ModNumLock)
+
 	// Platform tab/window shortcuts before clearing keyHandled — macOS may deliver
 	// TextInput for the letter before KeyPress returns.
 	if isMac {
-		if mods == gpucontext.ModSuper {
+		if cleanMods == gpucontext.ModSuper {
 			switch key {
 			case gpucontext.KeyT:
 				if u.cfg.Tabs.Enabled {
@@ -1526,7 +1643,7 @@ func (u *UI) handleKeyPress(ws *winState, key gpucontext.Key, mods gpucontext.Mo
 				return
 			}
 		}
-		if mods == gpucontext.ModSuper|gpucontext.ModShift {
+		if cleanMods == gpucontext.ModSuper|gpucontext.ModShift {
 			switch key {
 			case gpucontext.KeyRightBracket:
 				u.switchTab(ws, +1)
@@ -1539,7 +1656,7 @@ func (u *UI) handleKeyPress(ws *winState, key gpucontext.Key, mods gpucontext.Mo
 			}
 		}
 	} else {
-		if mods == gpucontext.ModControl|gpucontext.ModShift {
+		if cleanMods == gpucontext.ModControl|gpucontext.ModShift {
 			switch key {
 			case gpucontext.KeyT:
 				if u.cfg.Tabs.Enabled {
@@ -1557,7 +1674,7 @@ func (u *UI) handleKeyPress(ws *winState, key gpucontext.Key, mods gpucontext.Mo
 				return
 			}
 		}
-		if mods == gpucontext.ModControl && !mods.HasAlt() && !mods.HasSuper() {
+		if cleanMods == gpucontext.ModControl && !mods.HasAlt() && !mods.HasSuper() {
 			if key == gpucontext.KeyTab {
 				if mods.HasShift() {
 					u.switchTab(ws, -1)
@@ -2171,6 +2288,63 @@ func (u *UI) reorderTab(ws *winState, from, to int) {
 	case from > active && to <= active:
 		ws.activeTabIdx++
 	}
+}
+
+// shellBaseName returns the executable basename without a .exe suffix.
+func shellBaseName(path string) string {
+	base := filepath.Base(strings.ReplaceAll(path, `\`, `/`))
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".EXE")
+	return base
+}
+
+// shellDisplayName returns a short, user-facing label for a shell path
+// (e.g. powershell.exe → "PowerShell"). Used as a last-resort title only.
+func shellDisplayName(path string) string {
+	const shellZsh = "zsh"
+	switch strings.ToLower(shellBaseName(path)) {
+	case "powershell", "pwsh":
+		return "PowerShell"
+	case "cmd":
+		return "Command Prompt"
+	case "bash":
+		return "bash"
+	case shellZsh:
+		return shellZsh
+	case "fish":
+		return "fish"
+	default:
+		return shellBaseName(path)
+	}
+}
+
+// startupCwdTitle returns the directory the shell starts in (home), so tabs
+// match `PS C:\Users\...>` before the first OSC update.
+func startupCwdTitle() string {
+	if runtime.GOOS == osWindows {
+		if p := os.Getenv("USERPROFILE"); p != "" {
+			return p
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home
+	}
+	return ""
+}
+
+// normalizeOSCTitle cleans titles from the shell / ConPTY.
+// Windows conhost often sets OSC 0/2 to the process image path
+// (C:\...\powershell.exe); ignore those so a cwd title is not overwritten.
+func normalizeOSCTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	base := filepath.Base(strings.ReplaceAll(title, `\`, `/`))
+	if strings.HasSuffix(strings.ToLower(base), ".exe") {
+		return ""
+	}
+	return title
 }
 
 func clampInt(v, hi int) int {

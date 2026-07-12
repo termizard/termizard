@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strings"
 
 	"github.com/termizard/termizard/internal/app"
 	"github.com/termizard/termizard/internal/config"
@@ -37,6 +38,7 @@ func main() {
 	defer logger.Close()
 	defer func() {
 		if r := recover(); r != nil {
+			logger.Get().Error("panic recovered", "msg", fmt.Sprintf("%v", r), "stack", string(debug.Stack()))
 			fail("panic", fmt.Errorf("%v\n%s", r, debug.Stack()), logPath)
 		}
 	}()
@@ -52,17 +54,51 @@ func main() {
 		fail("config", err, logPath)
 	}
 
+	logger.Get().Debug("creating UI")
 	ui := gogpuui.New(cfg)
+	logger.Get().Debug("UI created, creating app")
 	a, err := app.New(cfg, ui)
+	logger.Get().Debug("app created", "err", err)
 	if err != nil {
+		logger.Get().Error("app init failed", "err", err)
 		fail("init", err, logPath)
 	}
 
 	logger.Get().Info("starting UI")
 	if err := a.Run(); err != nil {
-		fail("run", err, logPath)
+		runFailed(a, cfg, err, logPath)
+		return
 	}
 	logger.Get().Info("UI exited normally")
+}
+
+// runFailed handles a Run() error: if it looks like a GPU init failure and no
+// backend was forced, retry transparently with the software rasteriser.
+// Mirrors Rio terminal's CPU-fallback behavior on unsupported GPU drivers.
+func runFailed(a *app.App, cfg *config.Config, runErr error, logPath string) {
+	_ = a.Close()
+	if !isGPUError(runErr) || os.Getenv("GOGPU_GRAPHICS_API") != "" {
+		fail("run", runErr, logPath)
+		return
+	}
+	logger.Get().Warn("GPU init failed, retrying with software renderer", "err", runErr)
+	if err := os.Setenv("GOGPU_GRAPHICS_API", "software"); err != nil {
+		fail("run", runErr, logPath)
+		return
+	}
+	softwareRetry(cfg, logPath)
+}
+
+// isGPUError reports whether err looks like a wgpu/GPU initialisation failure
+// that can be retried with a software renderer.
+func isGPUError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "failed to request device") ||
+		strings.Contains(s, "failed to request adapter") ||
+		strings.Contains(s, "failed to open device")
 }
 
 func fail(stage string, err error, logPath string) {

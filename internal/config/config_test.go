@@ -325,12 +325,12 @@ func TestTabItemDisplayTitle(t *testing.T) {
 
 func TestTabsActive(t *testing.T) {
 	cfg := config.Defaults()
-	if cfg.TabsActive() {
-		t.Fatal("expected tabs inactive by default")
-	}
-	cfg.Tabs.Enabled = true
 	if !cfg.TabsActive() {
-		t.Fatal("expected tabs active when enabled")
+		t.Fatal("expected tabs active by default")
+	}
+	cfg.Tabs.Enabled = false
+	if cfg.TabsActive() {
+		t.Fatal("expected tabs inactive when disabled")
 	}
 }
 

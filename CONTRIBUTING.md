@@ -6,9 +6,9 @@ Thank you for your interest in contributing to TERMizard!
 
 ## Requirements
 
-- **Go 1.25+** (required for iterators, generics, and modern features)
+- **Go 1.26+**
 - **golangci-lint** for code quality checks
-- **Rust toolchain** (optional, for native rendering backend testing)
+- Windows: ConPTY (Windows 10 1809+ / Windows 11) for the shell session
 
 ---
 
