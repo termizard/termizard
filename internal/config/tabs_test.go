@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -75,6 +76,9 @@ func TestTabItemWorkingDirTildeSlashUsesUserHomeDir(t *testing.T) {
 }
 
 func TestTabItemShellCommandArgsOnlyUsesOverridePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("$SHELL is ignored on Windows; native shell detection is used instead")
+	}
 	cfg := config.Defaults()
 	t.Setenv("SHELL", "/bin/zsh")
 

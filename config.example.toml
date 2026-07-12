@@ -14,16 +14,18 @@ show_title_bar = true
 # min_width = 400
 # min_height = 240
 # opacity = 1.0
-# padding_x = 6
-# padding_y = 6
+# padding_x = 12
+# padding_y = 12
 
 # ── Tabs ────────────────────────────────────────────────────────────────────
-# One tab on startup. Add more via + button or hotkeys (kitty-style defaults).
+# One tab on startup. Add more via + button or hotkeys.
 # Mac: Cmd+T new, Cmd+W close, Cmd+Shift+]/[ next/prev tab.
+# Windows/Linux: Ctrl+Shift+T/W, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+Shift+N new window.
 
 [tabs]
 enabled = false
-# label = "path"            # path (shell title) | index (Tab 1, Tab 2, …)
+# label = "path"            # path (shell OSC title / process) | index (Tab 1, Tab 2, …)
+# size = "compact"            # compact (~180px slots) | full (stretch across the bar)
 # show_new_button = true      # + button when tab bar is visible
 # show_when_single = false    # hide tab bar while only one tab is open
 
@@ -40,10 +42,10 @@ enabled = false
 # family = '"Menlo", "SF Mono", "JetBrains Mono", monospace'
 # size = 13
 
-# ── Colors ──────────────────────────────────────────────────────────────────
+# ── Colors (JetBrains New UI) ───────────────────────────────────────────────
 
 [colors]
-# background = "rgba(30, 31, 34, 0.82)"
+# background = "#1e1f22"
 # foreground = "#BCBEC4"
 # cursor = "#BCBEC4"
 # selection = "rgba(33, 66, 131, 0.85)"
@@ -71,9 +73,18 @@ enabled = false
 [shell]
 # program = "/bin/zsh"
 # args = ["-l"]
-# Windows example:
+#
+# Windows (ConPTY). Default order when program is unset:
+#   pwsh.exe → powershell.exe → cmd.exe
+# Git Bash $SHELL is ignored on Windows.
+# PowerShell sessions publish $PWD to the window/tab title (stock PS prompt kept).
 # program = "pwsh.exe"
 # args = []
+# program = "powershell.exe"
+# args = []
+# program = "cmd.exe"
+# args = []
+#
 # no_oh_my_zsh = true   # bare zsh in termizard (does not touch ~/.zshrc)
 # prompt = "kali"       # Kali twoline layout when no_oh_my_zsh | none
 #

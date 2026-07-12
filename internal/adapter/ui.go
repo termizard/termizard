@@ -16,11 +16,11 @@ type ResizeEvent struct {
 }
 
 // UI is implemented by every windowing / rendering backend
-// (e.g. internal/ui/wails, internal/ui/mock).
+// (e.g. internal/ui/gogpu, internal/ui/mock).
 //
 // Lifecycle:
 //
-//	ui := wails.New(cfg)
+//	ui := gogpu.New(cfg)
 //	ui.OnKeyInput(func(e adapter.KeyEvent) { pty.Write(e.Data) })
 //	ui.OnResize(func(e adapter.ResizeEvent)  { pty.Resize(e.Cols, e.Rows) })
 //	go ui.Run()   // blocks until window closes
@@ -51,4 +51,8 @@ type UI interface {
 	// For xterm.js backends this emits a Wails event; for GPU backends it
 	// feeds data into the VTE parser and schedules a redraw.
 	Write(data []byte) (int, error)
+
+	// NotifyShellError reports PTY startup or exit failures to the frontend
+	// without closing the window.
+	NotifyShellError(tabID int, err error)
 }

@@ -21,7 +21,8 @@
 
 # Build output
 bin/
-termizard
+/termizard
+/termizard.exe
 
 # Generated from assets/logo.png during packaging (task common:generate:icons)
 build/appicon.png

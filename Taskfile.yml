@@ -4,12 +4,7 @@ vars:
   APP_NAME: "termizard"
   BIN_DIR: "bin"
   MAIN_PACKAGE: "./cmd/termizard"
-  FRONTEND_DIR: "frontend"
-  PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
-  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
-  # Target OS for build/package/run. Defaults to the host OS, and is overridden
-  # by `wails3 build GOOS=...` (or the GOOS env var) for cross-compilation. The
-  # tasks below dispatch to the matching platform Taskfile via this variable.
+  # Target OS for build/package/run. Defaults to the host OS; override with GOOS=windows etc.
   GOOS: '{{.GOOS | default OS}}'
 
 includes:
@@ -20,9 +15,16 @@ includes:
 
 tasks:
   build:
-    summary: Builds the application
+    summary: Builds the application for the current platform
     cmds:
       - task: "{{.GOOS}}:build"
+
+  build:dev:
+    summary: Builds a development binary (debug symbols, no strip)
+    cmds:
+      - task: "{{.GOOS}}:build"
+        vars:
+          DEV: "true"
 
   package:
     summary: Packages a production build of the application
@@ -30,36 +32,21 @@ tasks:
       - task: "{{.GOOS}}:package"
 
   run:
-    summary: Runs the application
+    summary: Builds and runs the application
     cmds:
       - task: "{{.GOOS}}:run"
 
-  dev:
-    summary: Runs the application in development mode
+  test:
+    summary: Runs all tests with race detector
     cmds:
-      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+      - go test -race -parallel 4 -count=1 ./...
 
-  setup:docker:
-    summary: Builds Docker image for cross-compilation (~800MB download)
+  lint:
+    summary: Runs golangci-lint
     cmds:
-      - task: common:setup:docker
+      - golangci-lint run ./...
 
-  build:server:
-    summary: Builds the application in server mode (no GUI, HTTP server only)
+  fmt:
+    summary: Formats all Go source files
     cmds:
-      - task: common:build:server
-
-  run:server:
-    summary: Runs the application in server mode
-    cmds:
-      - task: common:run:server
-
-  build:docker:
-    summary: Builds a Docker image for server mode deployment
-    cmds:
-      - task: common:build:docker
-
-  run:docker:
-    summary: Builds and runs the Docker image
-    cmds:
-      - task: common:run:docker
+      - gofmt -w ./cmd ./internal

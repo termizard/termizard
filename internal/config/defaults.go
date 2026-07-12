@@ -3,18 +3,18 @@ package config
 import "runtime"
 
 const (
-	modCtrl  = "Ctrl"
-	modShift = "Shift"
+	modCtrl     = "Ctrl"
+	modShift    = "Shift"
+	goosWindows = "windows"
 )
 
 // Defaults returns the out-of-the-box configuration: JetBrains IDE dark theme,
 // colors, blinking block cursor, and JetBrains Mono as the preferred font.
 func Defaults() *Config {
-	bg := "rgba(30, 31, 34, 0.82)"
-	fontFamily := `"Menlo", "SF Mono", "JetBrains Mono", "Monaco", "Courier New", monospace`
-	if runtime.GOOS == "windows" {
-		// Opaque background: xterm allowTransparency breaks on older Windows GPUs.
-		bg = "#1e1f22"
+	// JetBrains New UI editor surface; greenish chrome is painted around blocks in gogpu.
+	bg := "#1e1f22"
+	fontFamily := `"JetBrains Mono", "Menlo", "SF Mono", "Monaco", "Courier New", monospace`
+	if runtime.GOOS == goosWindows {
 		fontFamily = `"Cascadia Mono", "Consolas", "Courier New", monospace`
 	}
 	return &Config{
@@ -26,15 +26,16 @@ func Defaults() *Config {
 			MinWidth:      400,
 			MinHeight:     240,
 			Opacity:       1.0,
-			PaddingX:      6,
-			PaddingY:      6,
+			PaddingX:      12,
+			PaddingY:      12,
 			ShowTitleBar:  true,
 		},
 		Tabs: TabsConfig{
-			Enabled:        false,
+			Enabled:        true,
 			Label:          TabLabelPath,
+			Size:           TabSizeCompact,
 			ShowNewButton:  true,
-			ShowWhenSingle: false,
+			ShowWhenSingle: true,
 		},
 		Terminal: TerminalConfig{
 			InitialCols:    80,
@@ -42,13 +43,10 @@ func Defaults() *Config {
 			ReflowOnResize: true,
 		},
 		Font: FontConfig{
-			// Menlo/SF Mono ship with macOS and render basic prompts reliably in
-			// the embedded WebView even when Nerd Font / JetBrains Mono are absent.
 			Family: fontFamily,
-			Size:   13,
+			Size:   16,
 		},
 		Colors: ColorConfig{
-			// Semi-transparent on macOS/Linux so the animated backdrop shows through xterm.js.
 			Background: bg,
 			Foreground: "#BCBEC4",
 			Cursor:     "#BCBEC4",

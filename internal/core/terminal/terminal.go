@@ -43,8 +43,15 @@ type Terminal struct {
 	appKeypad      bool // DECKPAM/DECKPNM
 	bracketedPaste bool // ?2004h
 	autoWrap       bool // DECAWM  ?7h  (default on)
-
 	reflowOnResize bool // when true, re-break wrapped lines on column resize
+
+	// scrollGen increments on every scrollUp into scrollback (soft-wrap at bottom,
+	// LF at bottom, CSI S, …). The UI uses this to force a full framebuffer
+	// repaint so scrolled rows never leave stale pixels.
+	scrollGen uint64
+	// repaintGen increments on full-screen erase (ED 2/3). The UI sends SIGWINCH
+	// so tmux and similar programs redraw status bars after a clear.
+	repaintGen uint64
 }
 
 // compile-time check: Terminal implements vte.Performer.
@@ -111,6 +118,21 @@ func (t *Terminal) ClearDirty() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.active.grid.ClearDirty()
+}
+
+// ScrollGen returns a monotonic counter bumped whenever the primary screen
+// scrolls a line into the scrollback (soft-wrap / LF at the bottom, etc.).
+func (t *Terminal) ScrollGen() uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.scrollGen
+}
+
+// RepaintGen returns a monotonic counter bumped on full-screen erase (ED 2/3).
+func (t *Terminal) RepaintGen() uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.repaintGen
 }
 
 // CursorPos returns the cursor's (col, row) in the active screen.
@@ -448,6 +470,7 @@ func (t *Terminal) CSI(params [][]uint16, intermediates []byte, ignore bool, fin
 	case 'M': // DL — delete lines
 		n := max1(params)
 		s.grid.scrollUp(s.cursor.row, s.scrollBot, n)
+		s.grid.markDirtyAll()
 
 	case 'P': // DCH — delete characters
 		n := max1(params)
@@ -572,8 +595,12 @@ func (t *Terminal) newline(withCR bool) {
 func (t *Terminal) scrollUpOne(s *screen) {
 	if s == t.primary {
 		t.scrollback.Push(s.grid.lineForScrollback(s.scrollTop))
+		t.scrollGen++
 	}
 	s.grid.scrollUp(s.scrollTop, s.scrollBot, 1)
+	// Soft-wrap / LF at the bottom shifts every visible row: mark all dirty so
+	// renderers that paint incrementally never leave a stale prompt line.
+	s.grid.markDirtyAll()
 }
 
 // eraseDisplay clears part of the active screen.
@@ -593,13 +620,17 @@ func (t *Terminal) eraseDisplay(s *screen, mode int) {
 		s.grid.clearLine(row, 0, col)
 	case 2: // erase entire screen
 		for r := 0; r < s.rows(); r++ {
-			s.grid.clearLine(r, 0, s.cols()-1)
+			s.grid.clearLineFull(r)
 		}
+		t.scrollGen++
+		t.repaintGen++
 	case 3: // erase screen + scrollback (xterm extension)
 		for r := 0; r < s.rows(); r++ {
-			s.grid.clearLine(r, 0, s.cols()-1)
+			s.grid.clearLineFull(r)
 		}
 		t.scrollback = newScrollback(t.scrollback.cap)
+		t.scrollGen++
+		t.repaintGen++
 	}
 }
 

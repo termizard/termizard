@@ -7,11 +7,16 @@ import (
 	"strings"
 )
 
+const goosWindows = "windows"
+
 // DefaultShell returns the login shell for PTY children when config does not
 // override it. GUI-launched macOS apps often have no SHELL in their environment.
 func DefaultShell() string {
-	if sh := os.Getenv("SHELL"); sh != "" {
-		return sh
+	// Git for Windows sets $SHELL to bash.exe; ConPTY cannot run it reliably.
+	if runtime.GOOS != goosWindows {
+		if sh := os.Getenv("SHELL"); sh != "" {
+			return sh
+		}
 	}
 	return platformDefaultShell()
 }
@@ -31,6 +36,7 @@ func PrepareShellEnv(base []string) []string {
 	setIfEmpty(m, "SHELL", DefaultShell())
 
 	mergePATH(m)
+	preparePlatformEnv(m)
 
 	return envSlice(m)
 }
@@ -89,7 +95,7 @@ func mergePATH(m map[string]string) {
 
 func standardPathEntries() []string {
 	home, _ := os.UserHomeDir()
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		entries := []string{}
 		if home != "" {
 			entries = append(entries,
@@ -140,6 +146,12 @@ func envMap(env []string) map[string]string {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok {
 			continue
+		}
+		// Windows env lookup is case-insensitive; normalize to uppercase to
+		// prevent duplicate entries (e.g. "Path" and "PATH") that confuse
+		// CreateProcess and cause shells to start with a truncated PATH.
+		if runtime.GOOS == goosWindows {
+			k = strings.ToUpper(k)
 		}
 		m[k] = v
 	}

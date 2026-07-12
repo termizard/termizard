@@ -111,6 +111,9 @@ func TestShellCommandUsesDefaultShell(t *testing.T) {
 }
 
 func TestShellCommandUsesEnvShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("$SHELL is ignored on Windows; native shell detection is used instead")
+	}
 	t.Setenv("SHELL", "/bin/fish")
 	cfg := config.Defaults()
 	cfg.Shell.Program = ""
@@ -259,6 +262,7 @@ func TestLoadTabsConfig(t *testing.T) {
 [tabs]
 enabled = true
 label = "index"
+size = "full"
 show_new_button = false
 show_when_single = true
 `
@@ -274,6 +278,9 @@ show_when_single = true
 	}
 	if cfg.Tabs.Label != config.TabLabelIndex {
 		t.Fatalf("label = %q, want index", cfg.Tabs.Label)
+	}
+	if cfg.Tabs.Size != config.TabSizeFull {
+		t.Fatalf("size = %q, want full", cfg.Tabs.Size)
 	}
 	if cfg.Tabs.ShowNewButton {
 		t.Fatal("expected show_new_button false")
@@ -318,12 +325,12 @@ func TestTabItemDisplayTitle(t *testing.T) {
 
 func TestTabsActive(t *testing.T) {
 	cfg := config.Defaults()
-	if cfg.TabsActive() {
-		t.Fatal("expected tabs inactive by default")
-	}
-	cfg.Tabs.Enabled = true
 	if !cfg.TabsActive() {
-		t.Fatal("expected tabs active when enabled")
+		t.Fatal("expected tabs active by default")
+	}
+	cfg.Tabs.Enabled = false
+	if cfg.TabsActive() {
+		t.Fatal("expected tabs inactive when disabled")
 	}
 }
 

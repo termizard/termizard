@@ -8,14 +8,16 @@ import (
 	"testing"
 )
 
-func TestWindowsDefaultShellNotUnixPath(t *testing.T) {
-	t.Setenv("SHELL", "")
-	sh := windowsDefaultShell()
-	if sh == "" {
-		t.Fatal("windowsDefaultShell returned empty")
+func TestIsSpawnableExecutableRejectsWindowsApps(t *testing.T) {
+	if isSpawnableExecutable(`C:\Users\me\AppData\Local\Microsoft\WindowsApps\pwsh.exe`) {
+		t.Fatal("WindowsApps alias should not be spawnable")
 	}
-	if strings.HasPrefix(sh, "/") {
-		t.Fatalf("windowsDefaultShell = %q, want Windows path", sh)
+}
+
+func TestResolveSpawnablePathSkipsStub(t *testing.T) {
+	got := resolveSpawnablePath(`C:\Users\me\AppData\Local\Microsoft\WindowsApps\pwsh.exe`)
+	if got != "" && strings.Contains(strings.ToLower(got), `\windowsapps\`) {
+		t.Fatalf("resolveSpawnablePath = %q, want real install path", got)
 	}
 }
 
@@ -27,8 +29,21 @@ func TestNormalizeWindowsCommandReplacesUnixShell(t *testing.T) {
 	if strings.HasPrefix(got[0], "/") {
 		t.Fatalf("command[0] = %q, want Windows shell", got[0])
 	}
-	if len(got) != 2 || got[1] != "-l" {
-		t.Fatalf("normalizeWindowsCommand = %v, want Windows shell with -l arg", got)
+	for _, arg := range got[1:] {
+		if arg == "-l" {
+			t.Fatalf("normalizeWindowsCommand = %v, unix -l should be stripped", got)
+		}
+	}
+	if strings.Contains(strings.ToLower(got[0]), `\windowsapps\`) {
+		t.Fatalf("normalizeWindowsCommand = %v, must not use WindowsApps stub", got)
+	}
+}
+
+func TestNormalizeWindowsCommandInteractivePwsh(t *testing.T) {
+	pf := filepath.Join(`C:\Program Files`, "PowerShell", "7", "pwsh.exe")
+	got := normalizeWindowsCommand([]string{pf})
+	if !hasWindowsArg(got[1:], "-NoExit") {
+		t.Fatalf("normalizeWindowsCommand = %v, want -NoExit for interactive pwsh", got)
 	}
 }
 
@@ -37,7 +52,7 @@ func TestResolveCommandEmptyUsesWindowsShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] == "" {
+	if len(got) == 0 || got[0] == "" {
 		t.Fatalf("resolveCommand(nil) = %v", got)
 	}
 	if strings.HasPrefix(got[0], "/") {

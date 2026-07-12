@@ -3,6 +3,7 @@ package pty
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -123,5 +124,17 @@ func TestDefaultShellFallback(t *testing.T) {
 	t.Setenv("SHELL", "")
 	if sh := DefaultShell(); sh == "" {
 		t.Fatal("DefaultShell returned empty")
+	}
+}
+
+func TestPrepareShellEnvIgnoresGitBashSHELLOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows only")
+	}
+	t.Setenv("SHELL", `C:\Program Files\Git\bin\bash.exe`)
+	env := PrepareShellEnv([]string{"HOME=C:\\Users\\test"})
+	shell := envMap(env)["SHELL"]
+	if strings.Contains(strings.ToLower(shell), "bash") {
+		t.Fatalf("SHELL = %q, want Windows shell not git bash", shell)
 	}
 }

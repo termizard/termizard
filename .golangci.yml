@@ -150,6 +150,16 @@ linters:
           - gocritic
           - maintidx
 
+      # GPU terminal UI — renderer and event loop are inherently complex
+      - path: internal/ui/gogpu/.*\.go
+        linters:
+          - gocognit
+          - nestif
+          - gocyclo
+          - cyclop
+          - funlen
+          - maintidx
+
       # Pseudo-terminal proxy - low-level system interactions
       - path: internal/core/pty/.*\.go
         linters:
