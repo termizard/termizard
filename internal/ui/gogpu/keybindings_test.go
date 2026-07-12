@@ -2,6 +2,7 @@ package gogpu
 
 import (
 	"image/color"
+	"path/filepath"
 	"testing"
 
 	"github.com/gogpu/gpucontext"
@@ -139,8 +140,10 @@ func TestComputeTabLayoutInsetAlign(t *testing.T) {
 
 func TestShortenTabTitle(t *testing.T) {
 	got := shortenTabTitle("/Users/vlad/Workspace/opensource/gogpu-projects/wgpu-local")
-	if got != "…/gogpu-projects/wgpu-local" {
-		t.Fatalf("shorten = %q", got)
+	sep := string(filepath.Separator)
+	want := "…" + sep + "gogpu-projects" + sep + "wgpu-local"
+	if got != want {
+		t.Fatalf("shorten = %q, want %q", got, want)
 	}
 	if got := shortenTabTitle("caffeinate"); got != "caffeinate" {
 		t.Fatalf("process title = %q", got)
