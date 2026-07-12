@@ -546,7 +546,7 @@ func (u *UI) Run() error {
 			return
 		}
 		ws.mu.Lock()
-		ws.tex = nil
+		ws.destroyTex()
 		ws.mu.Unlock()
 	})
 
@@ -1205,6 +1205,11 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	prevCurCol := ws.lastCurCol
 
 	var oldTex *gogpulib.Texture
+	defer func() {
+		if oldTex != nil {
+			oldTex.Destroy()
+		}
+	}()
 	bg := u.palette.bg
 
 	var sel *selectionRange
@@ -1214,11 +1219,14 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	}
 	selChanged := (sel != nil) != ws.lastSelActive
 	layoutInProgress := ws.layoutInProgress
+	inLiveResize := u.app.InSizeMove()
 
 	if gridChanged {
-		if ws.tex != nil {
+		if ws.tex != nil && !inLiveResize {
 			oldTex = ws.tex
 			ws.tex = nil
+		} else if inLiveResize {
+			ws.pendingTexSync = true
 		}
 		needed := fw * fh * 4
 		if needed > cap(ws.frame) {
@@ -1273,8 +1281,29 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 		ws.frame, ws.frameAlt = alt, ws.frame
 		ws.frameW = fw
 		ws.frameH = fh
-		if ws.tex != nil {
-			oldTex = ws.tex
+		// During live resize (Windows modal WM_ENTERSIZEMOVE / macOS drag),
+		// recreating a full-window GPU texture every tick causes multi-GB growth
+		// (same class of leak as Metal IOSurface churn). Keep the existing tex
+		// and sync once when the drag ends.
+		if !inLiveResize {
+			if ws.tex != nil {
+				oldTex = ws.tex
+				ws.tex = nil
+			}
+		} else {
+			ws.pendingTexSync = true
+		}
+	}
+
+	// After live resize ends, force one texture recreate to match the final size.
+	if !inLiveResize && ws.pendingTexSync {
+		ws.pendingTexSync = false
+		if ws.tex != nil && (ws.tex.Width() != fw || ws.tex.Height() != fh) {
+			if oldTex == nil {
+				oldTex = ws.tex
+			} else {
+				ws.tex.Destroy()
+			}
 			ws.tex = nil
 		}
 	}
@@ -1430,9 +1459,6 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 	defer ws.mu.Unlock()
 
 	if frameW <= 0 || frameH <= 0 {
-		if oldTex != nil {
-			oldTex.Destroy()
-		}
 		return
 	}
 
@@ -1440,6 +1466,25 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 		scrollChanged || selChanged || blinkChanged || gridChanged || surfaceChanged || ws.tex == nil
 	if needUpdate {
 		applyEdgeChromeAfterGlyphs(frame, frameW, frameH, contentL, contentT, contentR, contentB, chromeTop, cornerR, &u.palette)
+	}
+
+	// During live resize we may keep a previous-size GPU texture to avoid
+	// per-tick allocation storms. Present it as-is until the drag ends.
+	if ws.tex != nil && shouldDeferGPUTexRecreate(inLiveResize, ws.tex.Width(), ws.tex.Height(), frameW, frameH) {
+		chrome := chromePanel(&u.palette)
+		ctx.Clear(float32(chrome.R)/255, float32(chrome.G)/255, float32(chrome.B)/255, 1)
+		if err := ctx.PresentTexture(ws.tex); err != nil {
+			u.debugf("onDraw #%d present(stale) err: %v", n, err)
+		}
+		return
+	}
+	if ws.tex != nil && (ws.tex.Width() != frameW || ws.tex.Height() != frameH) {
+		if oldTex == nil {
+			oldTex = ws.tex
+		} else {
+			ws.tex.Destroy()
+		}
+		ws.tex = nil
 	}
 
 	if ws.tex == nil {
@@ -1456,9 +1501,6 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 			}
 			if ws.texErrCount <= 10 {
 				u.app.RequestRedraw()
-			}
-			if oldTex != nil {
-				oldTex.Destroy()
 			}
 			return
 		}
@@ -1485,14 +1527,7 @@ func (u *UI) onDraw(ws *winState, ctx *gogpulib.Context) {
 		u.debugf("onDraw #%d present err: %v", n, err)
 		logger.Get().Warn("gogpu: present texture failed", "err", err)
 		u.app.RequestRedraw()
-		if oldTex != nil {
-			oldTex.Destroy()
-		}
 		return
-	}
-
-	if oldTex != nil {
-		oldTex.Destroy()
 	}
 
 	u.debugf("onDraw #%d ok tex=%dx%d grid=%dx%d painted=%v tabPainted=%v dirty=%v",

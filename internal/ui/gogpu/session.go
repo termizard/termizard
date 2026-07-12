@@ -198,6 +198,7 @@ type winState struct {
 	lastHoverTabIdx  int
 	lastTabBarShown  bool
 	pendingGC        bool
+	pendingTexSync   bool // recreate GPU tex after live-resize ends (Win/Linux)
 
 	// GPU resources — guarded by mu.
 	mu       sync.Mutex
@@ -474,6 +475,15 @@ func (ws *winState) destroyTex() {
 		ws.tex.Destroy()
 		ws.tex = nil
 	}
+}
+
+// shouldDeferGPUTexRecreate reports whether a live-resize drag should keep the
+// current GPU texture instead of allocating a new one every size tick.
+func shouldDeferGPUTexRecreate(inLiveResize bool, texW, texH, frameW, frameH int) bool {
+	if !inLiveResize || texW <= 0 || texH <= 0 {
+		return false
+	}
+	return texW != frameW || texH != frameH
 }
 
 // computeWordBounds returns the [start, end] column range of the word at (col, row).

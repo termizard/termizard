@@ -37,6 +37,7 @@ show_title_bar = true
 - Shell default: PowerShell 7 (`pwsh`) when installed, otherwise Windows PowerShell 5, then `cmd.exe`.
 - Interactive sessions use ConPTY (`CreatePseudoConsole`). Git Bash `$SHELL` is ignored — set `[shell] program` explicitly if you need another shell.
 - Window/tab titles follow the shell working directory (e.g. `C:\Users\you`), matching the path in `PS C:\Users\you>`. ConPTY process-image titles (`…\powershell.exe`) are ignored.
+- Live window resize defers full-window GPU texture recreation until the drag ends (Windows `WM_ENTERSIZEMOVE`, macOS/Wayland live-resize). Prevents multi-GB growth from per-tick texture churn.
 
 ```toml
 # config.toml — optional Windows shell override

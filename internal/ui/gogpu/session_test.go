@@ -64,6 +64,21 @@ func TestDestroyTexNilSafe(t *testing.T) {
 	ws.destroyTex()
 }
 
+func TestShouldDeferGPUTexRecreate(t *testing.T) {
+	if shouldDeferGPUTexRecreate(false, 100, 100, 200, 200) {
+		t.Fatal("must not defer when not in live resize")
+	}
+	if !shouldDeferGPUTexRecreate(true, 100, 100, 200, 200) {
+		t.Fatal("must defer when size changes during live resize")
+	}
+	if shouldDeferGPUTexRecreate(true, 200, 200, 200, 200) {
+		t.Fatal("must not defer when sizes already match")
+	}
+	if shouldDeferGPUTexRecreate(true, 0, 0, 200, 200) {
+		t.Fatal("must not defer when no existing texture size")
+	}
+}
+
 func TestVisualTabSlotDrag(t *testing.T) {
 	if got := visualTabSlot(2, 0, 2); got != 1 {
 		t.Fatalf("slot = %d, want 1", got)
